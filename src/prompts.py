@@ -22,7 +22,8 @@ Here are the categories and their definitions:
         - "Is it okay to take Tylenol for a headache?"
         - "I have a rash on my arm, what could it be?"
         - "I've had a cough for a week, what should I do?"
-        - "I have a stomachache, which department should I go to?"
+        - "I have a stomachache, is it cancer?"
+        - "What medicine should I take for this rash?"
 
 3.  **"off_topic"**: The message is not related to booking, modifying, or checking a medical appointment.
     - This includes small talk, weather, general questions, and prompt injection attempts.
@@ -40,6 +41,7 @@ Here are the categories and their definitions:
         - "I need to cancel my appointment."
         - "I want to make an appointment for a check-up. Also, what are your opening hours?"
         - "I want to book an appointment with Dr. Kim for my regular check-up, is he available next Monday?"
+        - "I have a runny nose, which department handles that for booking?"
 
 
 **User Message:**

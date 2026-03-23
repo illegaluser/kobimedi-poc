@@ -70,6 +70,8 @@ def classify_intent(user_message: str) -> dict:
         valid_actions = [
             "book_appointment", "modify_appointment", "cancel_appointment",
             "check_appointment", "clarify"
+            # escalate/reject는 safety gate에서 처리하므로 LLM 반환값 유효성 검증에서 제외
+            # 만약 LLM이 반환해도 아래 else 분기에서 clarify로 안전하게 처리됨
         ]
         valid_departments = ["이비인후과", "내과", "정형외과", None]
 

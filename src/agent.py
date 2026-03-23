@@ -59,9 +59,10 @@ def process_ticket(
     policy_result = apply_policy(intent_result, existing_appointment, all_appointments, now)
 
     if not policy_result["allowed"]:
-        # If policy fails, return a clarifying response with the reason.
+        # 정책 위반은 clarify가 아니라 reject로 처리
+        # (정보 부족이 아니라 정책 거절이므로)
         return build_response(
-            action="clarify",
+            action="reject",
             message=policy_result["reason"],
             department=intent_result.get("department")
         )
@@ -80,6 +81,8 @@ def process_ticket(
     elif action == "check_appointment":
         # In a real system, we would format the appointment details here.
         response_message = f"예약이 확인되었습니다: {existing_appointment}"
+    elif action == "clarify":
+        response_message = "예약 관련하여 더 자세한 정보가 필요합니다. 원하시는 날짜, 시간, 진료과를 알려주시겠어요?"
 
     return build_response(
         action=action,

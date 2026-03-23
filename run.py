@@ -1,6 +1,5 @@
-
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from src.agent import process_ticket
 
 def main():
@@ -38,11 +37,16 @@ def main():
         # In a real scenario, the agent would parse the booking time from the message.
         # For this PoC, we'll use a placeholder if it's a booking/modification intent.
         # We'll use the ticket timestamp as a reference for 'now'.
-        now = datetime.fromisoformat(ticket["timestamp"])
+        raw_ts = ticket["timestamp"]
+        now = datetime.fromisoformat(raw_ts)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         
         # We need to simulate the booking time the user might want.
         # This is not in the ticket data, so we'll create a dummy time for policy checks.
-        dummy_booking_time = "2025-03-25T14:00:00Z"
+        # 현재 기준 최소 48시간 이후로 설정하여 정책 체크가 의미 있게 동작하도록
+        fallback_booking = now + timedelta(days=2)
+        dummy_booking_time = fallback_booking.strftime("%Y-%m-%dT%H:%M:%SZ")
         ticket_for_agent = {
             "message": ticket["message"],
             "customer_type": ticket["customer_type"],
