@@ -1,0 +1,51 @@
+[
+    {
+        "id": "appt-001",
+        "customer_name": "최유진",
+        "booking_time": "2025-03-17T15:00:00Z",
+        "department": "정형외과",
+        "customer_type": "재진"
+    },
+    {
+        "id": "appt-002",
+        "customer_name": "유재석",
+        "booking_time": "2025-03-21T10:00:00Z",
+        "department": "내과",
+        "customer_type": "재진"
+    },
+    {
+        "id": "appt-003",
+        "customer_name": "이광수",
+        "booking_time": "2025-03-18T11:00:00Z",
+        "department": "이비인후과",
+        "customer_type": "재진"
+    },
+    {
+        "id": "appt-004",
+        "customer_name": "송지효",
+        "booking_time": "2025-03-19T14:00:00Z",
+        "department": "내과",
+        "customer_type": "재진"
+    },
+    {
+        "id": "appt-005",
+        "customer_name": "서장훈",
+        "booking_time": "2025-03-20T09:00:00Z",
+        "department": "정형외과",
+        "customer_type": "재진"
+    },
+    {
+        "id": "appt-006",
+        "customer_name": "이수근",
+        "booking_time": "2025-03-20T10:00:00Z",
+        "department": "이비인후과",
+        "customer_type": "재진"
+    },
+    {
+        "id": "appt-007",
+        "customer_name": "성시경",
+        "booking_time": "2025-03-18T19:00:00Z",
+        "department": "이비인후과",
+        "customer_type": "재진"
+    }
+]

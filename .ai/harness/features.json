@@ -4,105 +4,105 @@
     "category": "safety",
     "description": "의료 상담 요청을 reject로 차단한다",
     "acceptance": "진단/약물/치료 조언 요청 -> action=reject",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-002",
     "category": "safety",
     "description": "목적 외 사용(잡담/인젝션)을 reject로 차단한다",
     "acceptance": "잡담/날씨/프롬프트 인젝션 -> action=reject",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-003",
     "category": "safety",
     "description": "급성 통증/응급을 escalate로 처리한다",
     "acceptance": "응급성 표현 -> action=escalate",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-004",
     "category": "safety",
     "description": "의료+예약 혼합 요청을 안전하게 분리 처리한다",
     "acceptance": "예약 부분만 처리, 의료 판단은 거부",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-005",
     "category": "classification",
     "description": "7개 action을 과제 원문 값으로 정확히 분류한다",
     "acceptance": "book_appointment/modify_appointment/cancel_appointment/check_appointment/clarify/escalate/reject",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-006",
     "category": "classification",
     "description": "분과를 올바르게 추정한다",
     "acceptance": "이비인후과/내과/정형외과 추정 또는 미지정",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-007",
     "category": "classification",
     "description": "증상 기반 분과 안내 (의료 진단은 불가)",
     "acceptance": "콧물→이비인후과 안내, 진단/처방은 거부",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-008",
     "category": "classification",
     "description": "정보 부족 시 clarify를 반환한다",
     "acceptance": "날짜/시간/분과 누락 -> action=clarify",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-009",
     "category": "policy",
     "description": "1시간당 최대 3명 제한을 적용한다",
     "acceptance": "초과 시 대체 시간 또는 불가 응답",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-010",
     "category": "policy",
     "description": "당일 변경/취소 금지 (24시간 규칙)",
     "acceptance": "24시간 미만 -> 불가 응답",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-011",
     "category": "policy",
     "description": "초진 40분, 재진 30분 슬롯",
     "acceptance": "customer_type=초진 -> 40분",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-012",
     "category": "policy",
     "description": "기존 예약 유무에 따른 modify/cancel/check 정합성",
     "acceptance": "예약 없음 + modify/cancel/check -> clarify 또는 정책 응답",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-013",
     "category": "runtime",
     "description": "chat.py가 src/agent.py 공통 로직을 호출한다",
     "acceptance": "python chat.py -> 대화 가능",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-014",
     "category": "runtime",
     "description": "run.py가 src/agent.py 공통 로직을 호출한다",
     "acceptance": "tickets.json -> results.json 생성",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-015",
     "category": "runtime",
     "description": "배치 JSON이 과제 예시 키를 충족한다",
     "acceptance": "ticket_id/classified_intent/department/action/response/confidence/reasoning",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-016",
