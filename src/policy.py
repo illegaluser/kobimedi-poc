@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 # --- Constants ---
 DOCTOR_DEPARTMENT_MAP = {
@@ -97,6 +98,84 @@ def _policy_result(
     return result
 
 
+def _normalize_appointments_result(raw_result: Any) -> list[dict] | None:
+    if raw_result is None:
+        return []
+    if isinstance(raw_result, dict):
+        return [raw_result]
+    if isinstance(raw_result, (list, tuple)):
+        return [item for item in raw_result if isinstance(item, dict)]
+    return None
+
+
+def _build_storage_lookup_filters(intent: dict, now: datetime | None = None) -> tuple[str | None, dict]:
+    requested_start = _extract_requested_start(intent, now)
+    target_hint = intent.get("target_appointment_hint") or {}
+
+    customer_name = (
+        intent.get("customer_name")
+        or target_hint.get("customer_name")
+    )
+
+    filters: dict[str, Any] = {}
+    booking_id = intent.get("booking_id") or target_hint.get("id")
+    if booking_id:
+        filters["id"] = booking_id
+
+    department = intent.get("department") or target_hint.get("department")
+    if department:
+        filters["department"] = department
+
+    if requested_start is not None:
+        filters["booking_time"] = _format_datetime(requested_start)
+        filters["date"] = requested_start.date().isoformat()
+        filters["time"] = requested_start.strftime("%H:%M")
+    else:
+        date_value = intent.get("date") or target_hint.get("date")
+        time_value = intent.get("time") or target_hint.get("time")
+        if date_value:
+            filters["date"] = str(date_value)
+        if time_value:
+            filters["time"] = str(time_value)
+
+    return customer_name, filters
+
+
+def _find_existing_appointments_via_storage(
+    storage: Any,
+    intent: dict | None,
+    now: datetime | None = None,
+) -> list[dict] | None:
+    if storage is None:
+        return None
+
+    finder = getattr(storage, "find_bookings", None)
+    if finder is None and isinstance(storage, dict):
+        finder = storage.get("find_bookings")
+    if not callable(finder):
+        return None
+
+    lookup_intent = intent or {}
+    customer_name, filters = _build_storage_lookup_filters(lookup_intent, now)
+    attempts = [
+        lambda: finder(customer_name=customer_name, filters=filters),
+        lambda: finder(customer_name=customer_name, **filters),
+        lambda: finder(customer_name, filters),
+        lambda: finder(filters),
+        lambda: finder(),
+    ]
+
+    for attempt in attempts:
+        try:
+            normalized = _normalize_appointments_result(attempt())
+        except TypeError:
+            continue
+        if normalized is not None:
+            return normalized
+
+    return None
+
+
 def _extract_requested_start(intent: dict, now: datetime | None = None) -> datetime | None:
     reference_now = now or datetime.now(timezone.utc)
     booking_time = intent.get("booking_time")
@@ -187,8 +266,13 @@ def is_change_allowed(appointment_time_str: str | datetime, now: datetime) -> bo
     return now <= (appointment_time - timedelta(hours=24))
 
 
-def check_hourly_capacity(requested_start: datetime | str, all_appointments: list[dict]) -> tuple[bool, str | None]:
-    requested_start_dt = _normalize_datetime(requested_start, timezone.utc)
+def check_hourly_capacity(
+    requested_start: datetime | str,
+    all_appointments: list[dict],
+    now: datetime | None = None,
+) -> tuple[bool, str | None]:
+    reference_tz = (now.tzinfo if now is not None else timezone.utc) or timezone.utc
+    requested_start_dt = _normalize_datetime(requested_start, reference_tz)
     if requested_start_dt is None:
         return False, POLICY_REASONS["MISSING_BOOKING_TIME"]
 
@@ -213,8 +297,10 @@ def is_slot_available(
     requested_start_str: str | datetime,
     customer_type: str | None,
     existing_appointments: list[dict],
+    now: datetime | None = None,
 ) -> tuple[bool, str]:
-    requested_start = _normalize_datetime(requested_start_str, timezone.utc)
+    reference_tz = (now.tzinfo if now is not None else timezone.utc) or timezone.utc
+    requested_start = _normalize_datetime(requested_start_str, reference_tz)
     if requested_start is None:
         return False, POLICY_REASONS["MISSING_BOOKING_TIME"]
 
@@ -222,7 +308,7 @@ def is_slot_available(
     if duration_mins is None:
         return False, POLICY_REASONS["MISSING_CUSTOMER_TYPE"]
 
-    has_capacity, capacity_reason = check_hourly_capacity(requested_start, existing_appointments)
+    has_capacity, capacity_reason = check_hourly_capacity(requested_start, existing_appointments, now=now)
     if not has_capacity:
         return False, capacity_reason
 
@@ -244,17 +330,33 @@ def validate_existing_appointment(
     action: str,
     existing_appointment: dict | None,
     candidate_appointments: list[dict] | None = None,
+    *,
+    storage: Any = None,
+    intent: dict | None = None,
+    now: datetime | None = None,
 ) -> dict:
     if action not in {"modify_appointment", "cancel_appointment", "check_appointment"}:
         return _policy_result(True, "SUCCESS", recommended_action=action)
 
-    if candidate_appointments and len(candidate_appointments) > 1:
-        return _policy_result(False, "AMBIGUOUS_EXISTING_APPOINTMENT", recommended_action="clarify")
+    resolved_candidates = _find_existing_appointments_via_storage(storage, intent, now)
+    if resolved_candidates is None:
+        resolved_candidates = candidate_appointments
+    if resolved_candidates and len(resolved_candidates) > 1:
+        return _policy_result(
+            False,
+            "AMBIGUOUS_EXISTING_APPOINTMENT",
+            recommended_action="clarify",
+            candidate_appointments=resolved_candidates,
+        )
 
-    if not existing_appointment:
+    resolved_existing_appointment = existing_appointment
+    if resolved_candidates is not None:
+        resolved_existing_appointment = resolved_candidates[0] if resolved_candidates else None
+
+    if not resolved_existing_appointment:
         return _policy_result(False, "NO_EXISTING_APPOINTMENT", recommended_action="clarify")
 
-    return _policy_result(True, "SUCCESS", recommended_action=action)
+    return _policy_result(True, "SUCCESS", recommended_action=action, existing_appointment=resolved_existing_appointment)
 
 
 def evaluate_same_day_booking(intent: dict, now: datetime) -> dict:
@@ -276,8 +378,10 @@ def suggest_alternative_slots(
     customer_type: str | None,
     all_appointments: list[dict],
     limit: int = 3,
+    now: datetime | None = None,
 ) -> list[str]:
-    requested_start = _normalize_datetime(requested_start_str, timezone.utc)
+    reference_tz = (now.tzinfo if now is not None else timezone.utc) or timezone.utc
+    requested_start = _normalize_datetime(requested_start_str, reference_tz)
     if requested_start is None or get_appointment_duration(customer_type) is None:
         return []
 
@@ -286,7 +390,7 @@ def suggest_alternative_slots(
     candidate_start = _round_up_to_next_slot_boundary(requested_start)
 
     for _ in range(ALTERNATIVE_SLOT_SEARCH_LIMIT):
-        allowed, _reason = is_slot_available(candidate_start, customer_type, all_appointments)
+        allowed, _reason = is_slot_available(candidate_start, customer_type, all_appointments, now=now)
         if allowed:
             formatted = _format_datetime(candidate_start)
             if formatted not in seen:
@@ -305,6 +409,9 @@ def apply_policy(
     existing_appointment: dict | None,
     all_appointments: list[dict] | None,
     now: datetime,
+    *,
+    storage: Any = None,
+    candidate_appointments: list[dict] | None = None,
 ) -> dict:
     """Apply deterministic booking policy without any Ollama calls."""
     if all_appointments is None:
@@ -328,15 +435,20 @@ def apply_policy(
         if not same_day_result["allowed"]:
             alternatives: list[str] = []
             if same_day_result.get("recommended_action") == "clarify":
-                alternatives = suggest_alternative_slots(requested_start + timedelta(days=1), customer_type, all_appointments)
+                alternatives = suggest_alternative_slots(
+                    requested_start + timedelta(days=1),
+                    customer_type,
+                    all_appointments,
+                    now=now,
+                )
             same_day_result["needs_alternative"] = bool(alternatives)
             same_day_result["alternative_slots"] = alternatives
             same_day_result["slot_duration_minutes"] = duration_mins
             return same_day_result
 
-        allowed, reason = is_slot_available(requested_start, customer_type, all_appointments)
+        allowed, reason = is_slot_available(requested_start, customer_type, all_appointments, now=now)
         if not allowed:
-            alternatives = suggest_alternative_slots(requested_start, customer_type, all_appointments)
+            alternatives = suggest_alternative_slots(requested_start, customer_type, all_appointments, now=now)
             return _policy_result(
                 False,
                 _reason_code_from_text(reason),
@@ -349,12 +461,20 @@ def apply_policy(
         return _policy_result(True, "SUCCESS", recommended_action="book_appointment", slot_duration_minutes=duration_mins)
 
     if action in {"modify_appointment", "cancel_appointment", "check_appointment"}:
-        validation = validate_existing_appointment(action, existing_appointment)
+        validation = validate_existing_appointment(
+            action,
+            existing_appointment,
+            candidate_appointments=candidate_appointments,
+            storage=storage,
+            intent=intent,
+            now=now,
+        )
         if not validation["allowed"]:
             return validation
+        resolved_existing_appointment = validation.get("existing_appointment") or existing_appointment
 
         if action in {"modify_appointment", "cancel_appointment"}:
-            existing_start = _extract_appointment_start(existing_appointment, now.tzinfo)
+            existing_start = _extract_appointment_start(resolved_existing_appointment, now.tzinfo)
             if existing_start is None or not is_change_allowed(existing_start, now):
                 return _policy_result(False, "CHANGE_WINDOW_EXPIRED", recommended_action=action)
 
@@ -363,15 +483,15 @@ def apply_policy(
             if requested_start is None:
                 return _policy_result(False, "MISSING_BOOKING_TIME", recommended_action="clarify")
 
-            customer_type = intent.get("customer_type") or existing_appointment.get("customer_type")
+            customer_type = intent.get("customer_type") or resolved_existing_appointment.get("customer_type")
             duration_mins = get_appointment_duration(customer_type)
             if duration_mins is None:
                 return _policy_result(False, "MISSING_CUSTOMER_TYPE", recommended_action="clarify")
 
-            other_appointments = _exclude_existing_appointment(all_appointments, existing_appointment)
-            allowed, reason = is_slot_available(requested_start, customer_type, other_appointments)
+            other_appointments = _exclude_existing_appointment(all_appointments, resolved_existing_appointment)
+            allowed, reason = is_slot_available(requested_start, customer_type, other_appointments, now=now)
             if not allowed:
-                alternatives = suggest_alternative_slots(requested_start, customer_type, other_appointments)
+                alternatives = suggest_alternative_slots(requested_start, customer_type, other_appointments, now=now)
                 return _policy_result(
                     False,
                     _reason_code_from_text(reason),

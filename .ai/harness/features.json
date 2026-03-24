@@ -123,7 +123,7 @@
     "category": "policy",
     "description": "modify/cancel/check는 실제 예약 저장소의 상태를 진실원천으로 검증한다",
     "acceptance": "ticket.context 보조정보와 별도로 영속 저장된 예약 기록(JSON/DB) 기준으로 대상 예약 존재 여부를 판정한다",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-019",

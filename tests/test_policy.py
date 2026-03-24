@@ -6,6 +6,32 @@ from freezegun import freeze_time
 from src.policy import POLICY_REASONS, apply_policy, get_appointment_duration, validate_existing_appointment
 
 
+class FakeStorage:
+    def __init__(self, bookings):
+        self.bookings = list(bookings)
+        self.calls = []
+
+    def find_bookings(self, customer_name=None, filters=None):
+        self.calls.append({"customer_name": customer_name, "filters": filters or {}})
+        results = []
+        filters = filters or {}
+        for booking in self.bookings:
+            if customer_name and booking.get("customer_name") != customer_name:
+                continue
+            if filters.get("id") and booking.get("id") != filters["id"]:
+                continue
+            if filters.get("department") and booking.get("department") != filters["department"]:
+                continue
+            if filters.get("booking_time") and booking.get("booking_time") != filters["booking_time"]:
+                continue
+            if filters.get("date") and not booking.get("booking_time", "").startswith(filters["date"]):
+                continue
+            if filters.get("time") and filters["time"] not in booking.get("booking_time", ""):
+                continue
+            results.append(booking)
+        return results
+
+
 EXISTING_APPOINTMENTS_SAMPLE = [
     {
         "id": "appt-001",
@@ -200,6 +226,112 @@ def test_F018_ambiguous_existing_appointment_returns_clarify():
     assert result["allowed"] is False
     assert result["reason"] == POLICY_REASONS["AMBIGUOUS_EXISTING_APPOINTMENT"]
     assert result["recommended_action"] == "clarify"
+
+
+@freeze_time("2026-04-08T12:00:00+09:00")
+def test_F018_modify_cancel_check_use_storage_find_bookings_as_source_of_truth():
+    storage = FakeStorage(
+        [
+            {
+                "id": "booking-001",
+                "customer_name": "김민수",
+                "department": "이비인후과",
+                "booking_time": "2026-04-10T14:00:00+09:00",
+                "customer_type": "재진",
+            }
+        ]
+    )
+
+    for action in ["modify_appointment", "cancel_appointment", "check_appointment"]:
+        result = apply_policy(
+            {
+                "action": action,
+                "customer_name": "김민수",
+                "department": "이비인후과",
+                "date": "2026-04-10",
+                "time": "14:00",
+                "booking_time": "2026-04-10T14:00:00+09:00",
+                "customer_type": "재진",
+            },
+            None,
+            [],
+            datetime.now(timezone.utc),
+            storage=storage,
+        )
+
+        assert result["allowed"] is True
+        assert result["recommended_action"] == action
+
+    assert len(storage.calls) == 3
+    assert all(call["customer_name"] == "김민수" for call in storage.calls)
+    assert all(call["filters"]["department"] == "이비인후과" for call in storage.calls)
+
+
+@freeze_time("2026-04-08T12:00:00+09:00")
+def test_F018_storage_truth_overrides_missing_or_stale_context_hint():
+    storage = FakeStorage([])
+
+    result = apply_policy(
+        {
+            "action": "check_appointment",
+            "customer_name": "김민수",
+            "department": "이비인후과",
+            "date": "2026-04-10",
+            "time": "14:00",
+            "booking_time": "2026-04-10T14:00:00+09:00",
+        },
+        {
+            "id": "stale-context-booking",
+            "customer_name": "김민수",
+            "department": "이비인후과",
+            "booking_time": "2026-04-10T14:00:00+09:00",
+            "customer_type": "재진",
+        },
+        [],
+        datetime.now(timezone.utc),
+        storage=storage,
+    )
+
+    assert result["allowed"] is False
+    assert result["reason"] == POLICY_REASONS["NO_EXISTING_APPOINTMENT"]
+    assert result["recommended_action"] == "clarify"
+
+
+def test_F040_policy_time_judgment_uses_explicit_now_parameter_without_freezegun():
+    now = datetime.fromisoformat("2025-03-16T09:00:00+09:00")
+
+    allowed_result = apply_policy(
+        {
+            "action": "cancel_appointment",
+            "customer_name": "김민수",
+        },
+        {
+            "id": "existing-004",
+            "customer_name": "김민수",
+            "booking_time": "2025-03-17T09:00:00+09:00",
+            "customer_type": "재진",
+        },
+        [],
+        now,
+    )
+    blocked_result = apply_policy(
+        {
+            "action": "cancel_appointment",
+            "customer_name": "김민수",
+        },
+        {
+            "id": "existing-005",
+            "customer_name": "김민수",
+            "booking_time": "2025-03-17T08:59:00+09:00",
+            "customer_type": "재진",
+        },
+        [],
+        now,
+    )
+
+    assert allowed_result["allowed"] is True
+    assert blocked_result["allowed"] is False
+    assert blocked_result["reason"] == POLICY_REASONS["CHANGE_WINDOW_EXPIRED"]
 
 
 @freeze_time("2025-03-16T09:00:00+09:00")
