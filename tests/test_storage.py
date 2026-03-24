@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from src.storage import (
+    StorageConflictError,
     StorageDecodeError,
     StorageValidationError,
     StorageWriteError,
@@ -251,3 +252,72 @@ def test_create_booking_raises_write_error_and_preserves_original_file(tmp_path,
         )
 
     assert json.loads(storage_path.read_text(encoding="utf-8")) == original_data
+
+
+def test_create_booking_rechecks_storage_before_persist_and_blocks_duplicate_active_booking(tmp_path):
+    storage_path = tmp_path / "bookings.json"
+    create_booking(
+        {
+            "patient_name": "김민수",
+            "patient_contact": "010-1111-1111",
+            "birth_date": "1990-02-02",
+            "is_proxy_booking": False,
+            "department": "내과",
+            "booking_time": "2026-03-25T14:00:00+09:00",
+            "customer_type": "재진",
+        },
+        path=storage_path,
+    )
+
+    with pytest.raises(StorageConflictError):
+        create_booking(
+            {
+                "patient_name": "김민수",
+                "patient_contact": "01011111111",
+                "birth_date": "1990-02-02",
+                "is_proxy_booking": False,
+                "department": "내과",
+                "booking_time": "2026-03-25T14:00:00+09:00",
+                "customer_type": "재진",
+            },
+            path=storage_path,
+        )
+
+
+def test_create_booking_uses_custom_fresh_recheck_and_preserves_existing_file_on_conflict(tmp_path):
+    storage_path = tmp_path / "bookings.json"
+    existing = create_booking(
+        {
+            "patient_name": "박영희",
+            "patient_contact": "010-3333-3333",
+            "birth_date": "1985-03-03",
+            "is_proxy_booking": True,
+            "department": "이비인후과",
+            "booking_time": "2026-03-26T10:00:00+09:00",
+            "customer_type": "초진",
+        },
+        path=storage_path,
+    )
+
+    def deny_final_recheck(new_booking, current_bookings):
+        assert new_booking["patient_name"] == "최지훈"
+        assert current_bookings[0]["id"] == existing["id"]
+        return {"allowed": False, "reason": "해당 시간대는 방금 마감되었습니다."}
+
+    with pytest.raises(StorageConflictError, match="방금 마감되었습니다"):
+        create_booking(
+            {
+                "patient_name": "최지훈",
+                "patient_contact": "010-4444-4444",
+                "is_proxy_booking": False,
+                "department": "이비인후과",
+                "booking_time": "2026-03-26T10:30:00+09:00",
+                "customer_type": "재진",
+            },
+            path=storage_path,
+            availability_rechecker=deny_final_recheck,
+        )
+
+    persisted = load_bookings(storage_path)
+    assert len(persisted) == 1
+    assert persisted[0]["id"] == existing["id"]

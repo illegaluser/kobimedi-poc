@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -35,6 +36,10 @@ class StorageDecodeError(StorageReadError):
 
 class StorageWriteError(StorageError):
     """Raised when bookings.json cannot be written atomically."""
+
+
+class StorageConflictError(StorageError):
+    """Raised when a fresh storage recheck blocks persistence."""
 
 
 class StorageValidationError(StorageError):
@@ -243,9 +248,73 @@ def _prepare_booking_record(record: dict[str, Any], bookings: list[dict]) -> dic
     return booking
 
 
-def create_booking(record: dict[str, Any], path: str | Path | None = None) -> dict:
+def _has_active_duplicate_booking(booking: dict[str, Any], bookings: list[dict]) -> bool:
+    booking_contact = normalize_patient_contact(booking.get("patient_contact"))
+    booking_time = booking.get("booking_time")
+    booking_department = booking.get("department")
+
+    if not booking_contact or not booking_time or not booking_department:
+        return False
+
+    for existing_booking in bookings:
+        if existing_booking.get("status", "active") != "active":
+            continue
+        if normalize_patient_contact(existing_booking.get("patient_contact")) != booking_contact:
+            continue
+        if existing_booking.get("booking_time") != booking_time:
+            continue
+        if existing_booking.get("department") != booking_department:
+            continue
+        return True
+
+    return False
+
+
+def _interpret_recheck_result(result: Any) -> tuple[bool, str | None]:
+    if result is None:
+        return True, None
+
+    if isinstance(result, dict):
+        return bool(result.get("allowed", True)), result.get("reason") or result.get("message")
+
+    if isinstance(result, tuple) and result:
+        allowed = bool(result[0])
+        reason = str(result[1]) if len(result) > 1 and result[1] is not None else None
+        return allowed, reason
+
+    if isinstance(result, bool):
+        return result, None
+
+    return bool(result), None
+
+
+def _recheck_before_persist(
+    booking: dict[str, Any],
+    bookings: list[dict],
+    availability_rechecker: Callable[[dict[str, Any], list[dict]], Any] | None = None,
+) -> None:
+    if _has_active_duplicate_booking(booking, bookings):
+        raise StorageConflictError("이미 동일 환자에 대한 활성 예약이 같은 시간에 존재합니다.")
+
+    if availability_rechecker is None:
+        return
+
+    allowed, reason = _interpret_recheck_result(
+        availability_rechecker(dict(booking), [dict(item) for item in bookings])
+    )
+    if not allowed:
+        raise StorageConflictError(reason or "최종 저장 직전 저장소 재검증에 실패했습니다.")
+
+
+def create_booking(
+    record: dict[str, Any],
+    path: str | Path | None = None,
+    *,
+    availability_rechecker: Callable[[dict[str, Any], list[dict]], Any] | None = None,
+) -> dict:
     bookings = load_bookings(path)
     booking = _prepare_booking_record(record, bookings)
+    _recheck_before_persist(booking, bookings, availability_rechecker)
     bookings.append(booking)
     save_bookings(bookings, path)
     return booking

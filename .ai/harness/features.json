@@ -512,6 +512,7 @@
       "policy_ref": "AGENTS.md rule 5, policy_digest §7.1",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_storage.py"
     },
     {
@@ -522,6 +523,7 @@
       "policy_ref": "policy_digest §6.4, §7.3, §7.4",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "impl_note": "src/storage.py find_bookings()에 patient_contact 필터 추가"
     },
     {
@@ -532,6 +534,7 @@
       "policy_ref": "policy_digest §6.4, §7.3",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "impl_note": "src/storage.py resolve_customer_type_from_history()에 patient_contact 파라미터 추가"
     },
     {
@@ -541,7 +544,9 @@
       "description": "최종 확인 단계 직전에 저장소를 다시 조회해 정원/중복 여부 재검증. 스냅샷 의존 금지.",
       "policy_ref": "policy_digest §5.3, AGENTS.md rule 6",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_storage.py"
     },
     {
       "id": "F-065",
@@ -551,6 +556,7 @@
       "policy_ref": "AGENTS.md rule 10 (analogous), policy_digest §0.1",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_storage.py"
     },
     {
@@ -560,7 +566,9 @@
       "description": "create_booking() 호출 시 patient_name, patient_contact (필수), is_proxy_booking, birth_date (선택)를 레코드에 포함.",
       "policy_ref": "policy_digest §7.4",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_storage.py"
     },
     {
       "id": "F-067",
@@ -569,7 +577,9 @@
       "description": "context.has_existing_appointment, context.preferred_department는 후속 질문 줄이기용 힌트. 저장소 재검증 필수.",
       "policy_ref": "policy_digest §7.2",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_storage.py"
     },
     {
       "id": "F-071",

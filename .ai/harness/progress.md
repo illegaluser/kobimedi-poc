@@ -1,5 +1,21 @@
 # Progress
 
+## Phase 1 — Storage truth-source hardening completed (2026-03-25)
+- `src/storage.py` 보강 완료
+  - `create_booking()`에 최종 저장 직전 fresh recheck 훅(`availability_rechecker`)을 추가하여, 확정 직전 최신 저장소 상태 기준 재검증이 가능하도록 확장 (F-064)
+  - 동일 `patient_contact` + 동일 `booking_time` + 동일 `department`의 active 예약 중복을 저장 직전 차단하는 `StorageConflictError` 추가
+  - 저장소 재검증 실패/충돌 시 예외를 발생시켜 거짓 성공이 절대 반환되지 않도록 보강 (F-065)
+  - `data/bookings.json` 기반의 식별/판정 원칙을 유지하면서 `patient_name`, `patient_contact`, `is_proxy_booking` 필수 기록 계약을 지속 보장 (F-061, F-066)
+
+- `tests/test_storage.py` 보강 완료
+  - 동일 환자 동일 시각 active 중복 예약 차단 검증 추가
+  - 사용자 정의 fresh recheck 콜백이 예약 마감/충돌을 반환할 경우 예외가 발생하고 기존 파일이 보존되는지 검증 추가
+  - 기존 전화번호 우선 조회/초진·재진 판정/쓰기 실패 회귀 테스트와 함께 storage 정책 요구사항 재검증 완료
+
+- 검증 완료
+  - `python3 -m pytest tests/test_storage.py tests/test_dialogue.py tests/test_policy.py` → **28 passed**
+  - `.ai/harness/features.json`에서 `F-061 ~ F-067` `passes: true` 반영 완료
+
 ## Phase 3 — 의도 분류 및 LLM 예외 방어 구현 완료 (2026-03-25)
 - `src/llm_client.py` 구현 보강 완료
   - Ollama `qwen3-coder:30b` 호출을 `format='json'`으로 강제 유지 (F-011, F-083)
@@ -83,6 +99,16 @@
   - features.json에서 `F-034 ~ F-039` `passes: true` 반영 완료
 
 ## Current Status
+
+- Storage truth-source hardening 완료
+  - `src/storage.py`가 bookings.json 기준 최종 재검증 및 충돌 예외를 지원
+  - 전화번호 우선 식별, patient 필드 저장, 저장 실패/충돌 시 거짓 성공 금지 요구사항 반영 완료
+  - 저장소 관련 feature(`F-061 ~ F-067`) 상태를 harness에 반영 완료
+
+- Next step
+  - `src/agent.py` 대화 상태에 `is_proxy_booking`, `patient_name`, `patient_contact`를 본격 반영하여 본인/대리인 확인 및 세션 중간 상태 수집 흐름을 구현
+  - confirmation 직전 storage fresh recheck를 agent 예약 확정 흐름과 직접 연결
+  - dialogue state / extraction 중심의 Phase 0b~1 작업 계속 진행
 
 ### Documentation update completed (2026-03-25)
 - `docs/policy_digest.md` 업데이트 완료
