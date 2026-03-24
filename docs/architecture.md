@@ -53,16 +53,24 @@
 [2) Classification / Extraction]
   ├─ action 7개 분류
   ├─ 분과/의사/날짜/시간 추출
-  ├─ 초진/재진 추론
+  ├─ 환자명/전화번호/생년월일 추출
+  ├─ 본인/대리인 신호 추출
+  ├─ 초진/재진 후보 추론
   └─ 기존 예약 식별 정보 추출
         ↓
 [3) Dialogue State Merge]
   ├─ clarify 누적 슬롯 병합
+  ├─ 본인/대리인 여부 확인
+  ├─ 환자 본인 이름/전화번호 수집
+  ├─ 동명이인 생년월일 확인
   ├─ confirmation pending 확인
   └─ 다수 예약 후보 선택 처리
         ↓
 [4) Storage Lookup]
   ├─ 고객 기존 예약 조회
+  ├─ 전화번호 우선 환자 식별
+  ├─ 이름+생년월일 보조 식별
+  ├─ 신규 예약의 초진/재진 판정
   ├─ modify/cancel/check 대상 검증
   └─ 로컬 예약 기록 진실원천 확보
         ↓
@@ -70,7 +78,8 @@
   ├─ 24시간 변경/취소 규칙
   ├─ 1시간당 최대 3명
   ├─ 초진 40분 / 재진 30분
-  ├─ 당일 신규 예약 보수 처리
+  ├─ 일반 당일 신규 예약 허용
+  ├─ 당일 급성 통증/응급 escalate
   └─ 대체 슬롯 계산
         ↓
 [6) Persistence / Integration]
@@ -93,8 +102,8 @@
 | --- | --- | --- |
 | Input Adapter | CLI/배치 입력을 공통 ticket 포맷으로 정규화 | 입력이 비어 있으면 즉시 `reject` |
 | Safety Gate | 위험 요청 선차단 | 위험하면 후단으로 보내지 않음 |
-| Classification/Extraction | 자연어를 구조화 | 불확실하면 `clarify` |
-| Dialogue State | 멀티턴 정보 누적 및 확인 단계 제어 | 세션 없으면 단일 턴으로만 처리 |
+| Classification/Extraction | 자연어를 구조화하고 환자/대리 신호를 추출 | 불확실하면 `clarify` |
+| Dialogue State | 멀티턴 정보 누적, 본인/대리인 확인, 확인 단계 제어 | 세션 없으면 단일 턴으로만 처리 |
 | Storage | 기존 예약 조회/저장/갱신 | 실패 시 거짓 성공 금지 |
 | Policy Engine | 결정론적 허용/불가 판정 | 정책 우선, LLM 판단 무시 가능 |
 | cal.com | 외부 슬롯 조회/예약 생성 | 실패 시 안전 폴백 |
@@ -129,6 +138,7 @@ run.py
 | --- | --- | --- |
 | 세션 상태 | 있음 | 없음 |
 | clarify 누적 처리 | 가능 | 불가(단일 턴) |
+| 본인/대리인 확인 | 명시적 질문 가능 | 메시지 패턴 기반 추정 또는 `clarify` |
 | 확인 후 확정 2단계 | 가능 | 기본적으로 한 턴 결과만 반환 |
 | 저장소 접근 | 공통 계층 사용 | 공통 계층 사용 |
 | Agent Core | 동일 | 동일 |
@@ -247,24 +257,46 @@ run.py
 따라서 다음 상태를 보관해야 한다.
 
 - 누적 slot (`date`, `time`, `department`)
+- 본인/대리인 구분 (`is_proxy_booking`)
+- 환자 식별 정보 (`patient_name`, `patient_contact`, `birth_date`)
+- 저장소 조회로 확정된 `customer_type`
 - pending action
 - pending confirmation
 - pending candidate appointments
 - conversation history
 
-### 7.2 핵심 멀티턴 시나리오
+### 7.2 환자 식별 상태머신
+예약성 대화에서는 예약 정보를 묻기 전에 먼저 **누가 진료를 받는 환자인지**를 확정해야 한다.
+
+핵심 원칙:
+
+1. 예약 의도(`book/modify/cancel/check`)가 확정되면 우선 `is_proxy_booking`을 확인한다.
+2. 메시지에 “엄마 대신”, “아버지 예약”, “가족 대신” 같은 명시적 대리 표현이 있으면 바로 `is_proxy_booking=true`로 전환한다.
+3. 그렇지 않으면 chat 모드에서는 다음 질문을 먼저 한다.
+   - “예약하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 예약하시는 건가요?”
+4. 본인이면 본인 성명+전화번호를, 대리인이면 **환자 본인 성명+전화번호**를 수집한다.
+5. 수집된 `patient_contact`를 저장소 조회의 1차 키로 사용해 초진/재진 및 기존 예약을 판정한다.
+
+### 7.3 핵심 멀티턴 시나리오
 | 시나리오 | 구조 |
 | --- | --- |
+| 본인/대리인 확인 | 의도 확정 → self/proxy 질문 → 환자 본인 정보 수집 |
 | clarify 후 정보 보완 | 이전 슬롯 + 새 입력 병합 |
 | 예약 확정 2단계 | 후보 제안 → 사용자 동의 → 확정 |
 | 다수 예약 후보 선택 | 옵션 나열 → 번호/분과/일시로 선택 |
 
-### 7.3 batch 모드와의 차이
+### 7.4 batch 모드와의 차이
 batch는 세션이 없으므로 아래만 지원한다.
 
 - single-turn 안전 판정
 - single-turn 정책 판정
 - 즉시 반환 가능한 결과 생성
+
+추가 원칙:
+
+- 대리 표현이 명시되면 `is_proxy_booking=true`로 처리한다.
+- 대리 예약인데 환자 본인 정보가 확인되지 않으면 `clarify`를 반환한다.
+- 대리 표현이 없으면 본인 요청으로 간주하되, 이는 **batch의 실무형 폴백**일 뿐 진실 판정은 아니다.
 
 즉, batch는 `clarify`를 반환할 수는 있지만 후속 턴을 갖지 않는다.
 
@@ -291,6 +323,10 @@ features.json은 예약 업무를 단순 분류기가 아니라 **실제 예약 
 {
   "id": "appt-001",
   "customer_name": "김민수",
+  "patient_name": "김민수",
+  "patient_contact": "010-1234-5678",
+  "birth_date": "1990-02-02",
+  "is_proxy_booking": false,
   "booking_time": "2026-03-25T14:00:00+09:00",
   "department": "내과",
   "customer_type": "재진"
@@ -326,6 +362,23 @@ features.json은 예약 업무를 단순 분류기가 아니라 **실제 예약 
 위 경우 예약 성공을 거짓으로 말하면 안 된다.  
 반드시 `clarify`, `reject`, 또는 연동 실패 안내로 복구한다.
 
+추가 원칙:
+
+- 신규 예약에서는 예약 정보 확정 전에 먼저 본인/대리인 여부를 확인한다.
+- 환자 식별은 `patient_contact`를 1차 키로 사용한다.
+- 전화번호가 없고 동일 이름 예약 이력이 여러 명이면 생년월일을 추가 식별자로 사용한다.
+- 초진/재진은 사용자 입력 하드코딩이 아니라 저장소 이력으로 결정한다.
+- active 또는 과거 non-cancelled 이력이 있으면 `재진`, cancelled 이력만 있으면 `초진`으로 본다.
+
+### 8.5 저장소 조회 우선순위
+기존 예약 조회와 초진/재진 판정은 다음 우선순위를 따른다.
+
+1. `patient_contact`
+2. `patient_name + birth_date`
+3. `patient_name` 단독(저장소상 유일할 때만)
+
+즉, `ticket.customer_name`이나 `ticket.customer_type`은 조회 힌트일 뿐이며, 최종 판정 기준은 저장소다.
+
 ---
 
 ## 9. 정책 엔진 아키텍처
@@ -341,6 +394,12 @@ features.json은 예약 업무를 단순 분류기가 아니라 **실제 예약 
 - `evaluate_same_day_booking(intent, now)`
 - `suggest_alternative_slots(requested_start, customer_type, appointments)`
 - `apply_policy(intent, existing_appointment, all_appointments, now)`
+
+추가로 정책 엔진은 다음 전제를 가진다.
+
+- `customer_type`은 가능한 경우 저장소 조회 결과를 우선 사용한다.
+- 일반 당일 신규 예약은 금지하지 않는다.
+- 단, 당일 요청이라도 급성 통증/응급 표현이 있으면 `escalate`한다.
 
 ### 9.2 정책 입력과 출력
 
@@ -376,33 +435,39 @@ features.json은 예약 업무를 단순 분류기가 아니라 **실제 예약 
 
 ### 10.1 `book_appointment`
 1. safety 통과
-2. 분과/날짜/시간/고객유형 확보
-3. same-day 일반 예약 여부 확인
-4. 정원/겹침/슬롯 길이 검증
-5. chat 모드면 확인 질문 후 확정
-6. 저장소 기록 생성
-7. Q4 활성 시 cal.com booking 동기화
+2. 본인/대리인 여부 확인
+3. 환자 본인 성명/전화번호 확보
+4. 저장소 기반 초진/재진 판정
+5. 분과/날짜/시간 확보
+6. 일반 당일 예약/응급 여부 포함 정책 검증
+7. 정원/겹침/슬롯 길이 검증
+8. chat 모드면 확인 질문 후 확정
+9. 저장소 기록 생성
+10. Q4 활성 시 cal.com booking 동기화
 
 ### 10.2 `modify_appointment`
 1. 기존 예약 후보 조회
 2. 대상 0건이면 `clarify`
 3. 대상 2건 이상이면 `clarify`
-4. 24시간 규칙 검증
-5. 새 슬롯 가용성 검증
-6. 저장소 update
-7. 필요 시 cal.com reschedule 전략 적용
+4. 본인/대리인 여부 및 환자 식별 확인
+5. 24시간 규칙 검증
+6. 새 슬롯 가용성 검증
+7. 저장소 update
+8. 필요 시 cal.com reschedule 전략 적용
 
 ### 10.3 `cancel_appointment`
 1. 기존 예약 후보 조회
 2. 대상 모호성 해소
-3. 24시간 규칙 검증
-4. 저장소 cancel 반영
-5. 필요 시 cal.com cancel 반영
+3. 본인/대리인 여부 및 환자 식별 확인
+4. 24시간 규칙 검증
+5. 저장소 cancel 반영
+6. 필요 시 cal.com cancel 반영
 
 ### 10.4 `check_appointment`
 1. 기존 예약 후보 조회
 2. 다수면 clarify
-3. 1건이면 조회 응답 생성
+3. 본인/대리인 여부 및 환자 식별 확인
+4. 1건이면 조회 응답 생성
 
 ### 10.5 `clarify`
 - 필수 정보 부족

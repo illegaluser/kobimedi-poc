@@ -14,7 +14,13 @@ from .response_builder import (
     build_response,
     build_success_message,
 )
-from .storage import create_booking, find_bookings, load_bookings
+from .storage import (
+    create_booking,
+    find_bookings,
+    load_bookings,
+    normalize_birth_date,
+    resolve_customer_type_from_history,
+)
 
 
 AFFIRMATIVE_PATTERNS = [r"^네$", r"^예$", r"^넵$", r"^맞아요$", r"좋아요", r"진행", r"예약해", r"확정"]
@@ -40,12 +46,14 @@ def _load_appointments_from_disk() -> list[dict]:
 def create_session(
     *,
     customer_name: str | None = None,
+    birth_date: str | None = None,
     customer_type: str | None = None,
     all_appointments: list[dict] | None = None,
     context: dict | None = None,
 ) -> dict:
     return {
         "customer_name": customer_name,
+        "birth_date": birth_date,
         "customer_type": customer_type,
         "context": context or {},
         "all_appointments": list(all_appointments) if all_appointments is not None else _load_appointments_from_disk(),
@@ -297,6 +305,9 @@ def _init_session_state(session_state: dict | None) -> dict:
         return {
             "conversation_history": [],
             "accumulated_slots": {"date": None, "time": None, "department": None},
+            "customer_name": None,
+            "birth_date": None,
+            "resolved_customer_type": None,
             "pending_confirmation": None,
             "pending_action": None,
             "pending_missing_info": [],
@@ -305,6 +316,9 @@ def _init_session_state(session_state: dict | None) -> dict:
 
     session_state.setdefault("conversation_history", [])
     session_state.setdefault("accumulated_slots", {"date": None, "time": None, "department": None})
+    session_state.setdefault("customer_name", None)
+    session_state.setdefault("birth_date", None)
+    session_state.setdefault("resolved_customer_type", None)
     session_state.setdefault("pending_confirmation", None)
     session_state.setdefault("pending_action", None)
     session_state.setdefault("pending_missing_info", [])
@@ -397,11 +411,17 @@ def _classify_intent_with_optional_now(user_message: str, now: datetime) -> dict
 
 
 def _run_safety_gate(user_message: str, session_state: dict | None = None) -> dict:
-    if session_state is not None and isinstance(classify_safety, Mock):
+    if session_state is not None:
         if session_state.get("pending_confirmation") and (_is_affirmative(user_message) or _is_negative(user_message)):
             return {"category": "safe"}
 
         if session_state.get("pending_candidates") and re.fullmatch(r"\d+번(이요|이에요|으로|로)?", _normalize_text(user_message)):
+            return {"category": "safe"}
+
+        pending_missing_info = session_state.get("pending_missing_info") or []
+        if "customer_name" in pending_missing_info and _extract_patient_name(user_message):
+            return {"category": "safe"}
+        if "birth_date" in pending_missing_info and _extract_birth_date(user_message):
             return {"category": "safe"}
 
     return _normalize_safety_result(classify_safety(user_message))
@@ -570,7 +590,80 @@ def _merge_accumulated_slots(session_state: dict | None, intent_result: dict) ->
     return merged
 
 
-def _determine_missing_info(action: str, slots: dict) -> list[str]:
+def _get_effective_customer_name(ticket: dict | None, session_state: dict | None) -> str | None:
+    return (ticket or {}).get("customer_name") or (session_state or {}).get("customer_name")
+
+
+def _get_effective_birth_date(ticket: dict | None, session_state: dict | None) -> str | None:
+    raw_birth_date = (ticket or {}).get("birth_date") or (session_state or {}).get("birth_date")
+    return normalize_birth_date(raw_birth_date)
+
+
+def _extract_patient_name(text: str | None) -> str | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    candidates = [normalized]
+    match = re.search(r"(?:제 이름은|이름은|저는|환자 이름은)\s*([가-힣A-Za-z]{2,20})", normalized)
+    if match:
+        candidates.insert(0, match.group(1))
+
+    for candidate in candidates:
+        cleaned = re.sub(r"(?:입니다|이에요|예요|이요|요)$", "", candidate).strip(" .,!")
+        if re.fullmatch(r"[가-힣A-Za-z]{2,20}", cleaned):
+            return cleaned
+    return None
+
+
+def _extract_birth_date(text: str | None) -> str | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    candidates = [normalized]
+    pattern_match = re.search(r"(\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{8}|\d{4}년\s*\d{1,2}월\s*\d{1,2}일)", normalized)
+    if pattern_match:
+        candidates.insert(0, pattern_match.group(1))
+
+    for candidate in candidates:
+        parsed = normalize_birth_date(candidate)
+        if parsed:
+            return parsed
+    return None
+
+
+def _resolve_history_customer_type(customer_name: str | None, birth_date: str | None) -> dict:
+    if not customer_name:
+        return {
+            "customer_type": None,
+            "ambiguous": False,
+            "birth_date_candidates": [],
+            "matched_bookings": [],
+            "has_non_cancelled_history": False,
+            "has_cancelled_history": False,
+        }
+
+    try:
+        return resolve_customer_type_from_history(customer_name, birth_date=birth_date)
+    except Exception:
+        return {
+            "customer_type": None,
+            "ambiguous": False,
+            "birth_date_candidates": [],
+            "matched_bookings": [],
+            "has_non_cancelled_history": False,
+            "has_cancelled_history": False,
+        }
+
+
+def _determine_missing_info(
+    action: str,
+    slots: dict,
+    customer_name: str | None = None,
+    birth_date: str | None = None,
+    history_resolution: dict | None = None,
+) -> list[str]:
     if action != "book_appointment":
         return []
 
@@ -581,7 +674,84 @@ def _determine_missing_info(action: str, slots: dict) -> list[str]:
         missing.append("date")
     if not slots.get("time"):
         missing.append("time")
+    if not customer_name:
+        missing.append("customer_name")
+        return missing
+    if history_resolution and history_resolution.get("ambiguous") and not birth_date:
+        missing.append("birth_date")
     return missing
+
+
+def _consume_pending_identity_input(
+    user_message: str,
+    ticket: dict,
+    session_state: dict | None,
+) -> tuple[dict | None, dict | None]:
+    if session_state is None:
+        return None, None
+
+    pending_missing_info = list(session_state.get("pending_missing_info") or [])
+    if not pending_missing_info:
+        return None, None
+
+    identity_missing = any(field in pending_missing_info for field in ["customer_name", "birth_date"])
+    if not identity_missing:
+        return None, None
+
+    consumed_identity = False
+
+    if "customer_name" in pending_missing_info and not _get_effective_customer_name(ticket, session_state):
+        patient_name = _extract_patient_name(user_message)
+        if not patient_name:
+            return (
+                _build_response_and_record(
+                    session_state,
+                    action="clarify",
+                    message=build_missing_info_question(["customer_name"], action_context="book_appointment"),
+                    ticket=ticket,
+                    classified_intent="clarify",
+                    intent_result={"action": "clarify", "missing_info": ["customer_name"]},
+                    customer_type=None,
+                ),
+                None,
+            )
+        session_state["customer_name"] = patient_name
+        ticket["customer_name"] = patient_name
+        pending_missing_info = [item for item in pending_missing_info if item != "customer_name"]
+        consumed_identity = True
+
+    if "birth_date" in pending_missing_info and not _get_effective_birth_date(ticket, session_state):
+        parsed_birth_date = _extract_birth_date(user_message)
+        if not parsed_birth_date:
+            return (
+                _build_response_and_record(
+                    session_state,
+                    action="clarify",
+                    message=build_missing_info_question(["birth_date"], action_context="book_appointment"),
+                    ticket=ticket,
+                    classified_intent="clarify",
+                    intent_result={"action": "clarify", "missing_info": ["birth_date"]},
+                    customer_type=None,
+                ),
+                None,
+            )
+        session_state["birth_date"] = parsed_birth_date
+        ticket["birth_date"] = parsed_birth_date
+        pending_missing_info = [item for item in pending_missing_info if item != "birth_date"]
+        consumed_identity = True
+
+    session_state["pending_missing_info"] = pending_missing_info
+    if consumed_identity:
+        slots = session_state.get("accumulated_slots", {})
+        return None, {
+            "action": session_state.get("pending_action") or "book_appointment",
+            "department": slots.get("department"),
+            "date": slots.get("date"),
+            "time": slots.get("time"),
+            "missing_info": [],
+        }
+
+    return None, None
 
 
 def _build_booking_time(date_value: str | None, time_value: str | None, now: datetime) -> str | None:
@@ -648,21 +818,28 @@ def _merge_appointment_sources(*appointment_groups: list[dict]) -> list[dict]:
     return merged
 
 
-def _load_storage_appointments(customer_name: str | None) -> list[dict]:
+def _load_storage_appointments(customer_name: str | None, birth_date: str | None = None) -> list[dict]:
     if not customer_name:
         return []
     try:
-        return find_bookings(customer_name=customer_name)
+        filters = {"birth_date": birth_date} if birth_date else None
+        return find_bookings(customer_name=customer_name, filters=filters)
     except Exception:
         return []
 
 
 def _find_customer_appointments(ticket: dict, all_appointments: list[dict], existing_appointment: dict | None) -> list[dict]:
     customer_name = ticket.get("customer_name")
-    storage_matches = _load_storage_appointments(customer_name)
+    birth_date = ticket.get("birth_date")
+    storage_matches = _load_storage_appointments(customer_name, birth_date)
 
     if customer_name:
-        matches = [appointment for appointment in all_appointments if appointment.get("customer_name") == customer_name]
+        matches = [
+            appointment
+            for appointment in all_appointments
+            if appointment.get("customer_name") == customer_name
+            and (not birth_date or normalize_birth_date(appointment.get("birth_date")) == normalize_birth_date(birth_date))
+        ]
         merged_matches = _merge_appointment_sources(storage_matches, matches)
         if merged_matches:
             return merged_matches
@@ -790,15 +967,23 @@ def process_ticket(
     if all_appointments is None:
         all_appointments = _load_appointments_from_disk()
 
+    state = _init_session_state(session_state) if session_state is not None else None
+    ticket = dict(ticket)
+    if ticket.get("birth_date"):
+        ticket["birth_date"] = normalize_birth_date(ticket.get("birth_date"))
     customer_type = ticket.get("customer_type")
+    if state is not None:
+        if ticket.get("customer_name"):
+            state["customer_name"] = ticket.get("customer_name")
+        if ticket.get("birth_date"):
+            state["birth_date"] = normalize_birth_date(ticket.get("birth_date"))
+            ticket["birth_date"] = state.get("birth_date")
     existing_appointment = _resolve_existing_appointment_from_ticket(
         ticket,
         all_appointments,
         existing_appointment,
         now,
     )
-
-    state = _init_session_state(session_state) if session_state is not None else None
     user_message = ticket.get("message")
     if not user_message:
         return _build_response_and_record(
@@ -873,7 +1058,13 @@ def process_ticket(
         selected_existing_appointment = None
         action_override = None
 
-    if selected_existing_appointment is None:
+    consumed_identity_response, forced_intent_result = _consume_pending_identity_input(user_message, ticket, state)
+    if consumed_identity_response is not None:
+        return consumed_identity_response
+
+    if forced_intent_result is not None:
+        intent_result = forced_intent_result
+    elif selected_existing_appointment is None:
         classification_message = safety_result.get("safe_booking_text") or user_message
         intent_result = _classify_intent_with_optional_now(classification_message, now)
         if intent_result.get("error"):
@@ -918,8 +1109,24 @@ def process_ticket(
     if state is not None:
         state["pending_action"] = action
 
+    effective_customer_name = _get_effective_customer_name(ticket, state)
+    effective_birth_date = _get_effective_birth_date(ticket, state)
+    history_resolution = None
     if action == "book_appointment":
-        missing_info = _determine_missing_info(action, merged_slots)
+        history_resolution = _resolve_history_customer_type(effective_customer_name, effective_birth_date)
+        if state is not None and effective_customer_name:
+            state["customer_name"] = effective_customer_name
+        if state is not None and effective_birth_date:
+            state["birth_date"] = effective_birth_date
+
+    if action == "book_appointment":
+        missing_info = _determine_missing_info(
+            action,
+            merged_slots,
+            customer_name=effective_customer_name,
+            birth_date=effective_birth_date,
+            history_resolution=history_resolution,
+        )
         if missing_info:
             if state is not None:
                 state["pending_missing_info"] = missing_info
@@ -953,7 +1160,11 @@ def process_ticket(
             customer_type=customer_type,
         )
 
-    customer_type = customer_type or "재진"
+    if action == "book_appointment":
+        customer_type = (history_resolution or {}).get("customer_type")
+        if state is not None:
+            state["resolved_customer_type"] = customer_type
+
     booking_time = _build_booking_time(merged_slots.get("date"), merged_slots.get("time"), now)
     target_existing_appointment = selected_existing_appointment or existing_appointment
 
@@ -983,6 +1194,8 @@ def process_ticket(
     intent_payload = {
         **intent_result,
         "action": action,
+        "customer_name": effective_customer_name,
+        "birth_date": effective_birth_date,
         "department": department,
         "date": merged_slots.get("date"),
         "time": merged_slots.get("time"),
@@ -1042,7 +1255,8 @@ def process_ticket(
 
     if action == "book_appointment":
         appointment = {
-            "customer_name": ticket.get("customer_name"),
+            "customer_name": effective_customer_name,
+            "birth_date": effective_birth_date,
             "department": department,
             "date": merged_slots.get("date"),
             "time": merged_slots.get("time"),
@@ -1095,6 +1309,9 @@ def process_message(user_message: str, session: dict | None = None, now: datetim
         session = create_session()
 
     dialogue_state = session.setdefault("dialogue_state", {})
+    dialogue_state.setdefault("customer_name", session.get("customer_name"))
+    dialogue_state.setdefault("birth_date", normalize_birth_date(session.get("birth_date")))
+    dialogue_state.setdefault("resolved_customer_type", session.get("customer_type"))
     all_appointments = session.get("all_appointments")
     if all_appointments is None:
         all_appointments = _load_appointments_from_disk()
@@ -1102,8 +1319,9 @@ def process_message(user_message: str, session: dict | None = None, now: datetim
 
     ticket = {
         "message": user_message,
-        "customer_name": session.get("customer_name"),
-        "customer_type": session.get("customer_type"),
+        "customer_name": session.get("customer_name") or dialogue_state.get("customer_name"),
+        "birth_date": normalize_birth_date(session.get("birth_date") or dialogue_state.get("birth_date")),
+        "customer_type": session.get("customer_type") or dialogue_state.get("resolved_customer_type"),
         "context": session.get("context", {}),
     }
 
@@ -1122,5 +1340,8 @@ def process_message(user_message: str, session: dict | None = None, now: datetim
         session_state=dialogue_state,
         now=now,
     )
+    session["customer_name"] = dialogue_state.get("customer_name") or session.get("customer_name")
+    session["birth_date"] = dialogue_state.get("birth_date") or session.get("birth_date")
+    session["customer_type"] = dialogue_state.get("resolved_customer_type") or session.get("customer_type")
     session["last_result"] = result
     return result

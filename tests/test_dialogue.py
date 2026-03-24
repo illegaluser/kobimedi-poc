@@ -289,3 +289,96 @@ def test_batch_like_call_without_session_state_remains_single_turn(
     assert result["action"] == "clarify"
     assert "예약할까요" in result["response"]
     assert result["classified_intent"] == "book_appointment"
+
+
+@patch("src.agent.resolve_customer_type_from_history")
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+@patch("src.agent.classify_safety")
+def test_booking_flow_collects_name_then_birth_date_before_confirmation(
+    mock_classify_safety,
+    mock_classify_intent,
+    mock_apply_policy,
+    mock_resolve_customer_type,
+):
+    mock_classify_safety.return_value = SAFE_RESULT
+    mock_classify_intent.return_value = {
+        "action": "book_appointment",
+        "department": "내과",
+        "date": "2026-03-25",
+        "time": "14:00",
+        "missing_info": [],
+    }
+    mock_apply_policy.return_value = {
+        "allowed": True,
+        "reason": "정책 검사를 통과했습니다.",
+        "recommended_action": "book_appointment",
+    }
+    mock_resolve_customer_type.side_effect = [
+        {
+            "customer_type": None,
+            "ambiguous": True,
+            "birth_date_candidates": ["1988-01-01", "1990-02-02"],
+            "matched_bookings": [],
+            "has_non_cancelled_history": False,
+            "has_cancelled_history": False,
+        },
+        {
+            "customer_type": "재진",
+            "ambiguous": False,
+            "birth_date_candidates": ["1988-01-01", "1990-02-02"],
+            "matched_bookings": [{"id": "booking-001"}],
+            "has_non_cancelled_history": True,
+            "has_cancelled_history": False,
+        },
+    ]
+
+    session_state = {}
+
+    first_result = process_ticket(
+        {
+            "message": "내일 2시 내과 예약",
+        },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+
+    assert first_result["action"] == "clarify"
+    assert "성함" in first_result["response"]
+    assert session_state["pending_missing_info"] == ["customer_name"]
+
+    second_result = process_ticket(
+        {
+            "message": "김민수",
+        },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+
+    assert second_result["action"] == "clarify"
+    assert "생년월일" in second_result["response"]
+    assert session_state["customer_name"] == "김민수"
+    assert session_state["pending_missing_info"] == ["birth_date"]
+
+    third_result = process_ticket(
+        {
+            "message": "1990-02-02",
+        },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+
+    assert third_result["action"] == "clarify"
+    assert "예약할까요" in third_result["response"]
+    assert "내과" in third_result["response"]
+    assert session_state["birth_date"] == "1990-02-02"
+    assert session_state["resolved_customer_type"] == "재진"
+    assert session_state["pending_confirmation"]["appointment"]["customer_type"] == "재진"
+    assert session_state["pending_confirmation"]["appointment"]["birth_date"] == "1990-02-02"
+    mock_classify_intent.assert_called_once()

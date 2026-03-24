@@ -115,6 +115,10 @@ def build_missing_info_question(
     missing_fields = missing_fields or []
     primary = missing_fields[0] if missing_fields else None
 
+    if primary == "customer_name":
+        return "예약 진행을 위해 환자분 성함을 알려주세요."
+    if primary == "birth_date":
+        return "동명이인 확인을 위해 환자분 생년월일을 YYYY-MM-DD 형식으로 알려주세요."
     if primary == "department":
         return "어느 분과로 예약할까요?"
     if primary == "date":

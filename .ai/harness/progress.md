@@ -1,61 +1,171 @@
 # Progress
 
-## Current status
-- 문서: policy_digest done, architecture done(골격), final_report 골격
-- 설계: 10_plan.md 완성, 20_impl.md 작성됨
-- 구현: Safety Phase(F-001~F-005) 완료
-  - `process_ticket()` 시작 지점에서 safety gate를 항상 먼저 실행하도록 재정렬
-  - 위험 요청(reject/escalate)은 pending confirmation / candidate resolution / classification / policy 이전에 즉시 종료되도록 보강
-  - 혼합 요청(F-004): 의료 상담 부분은 거부하고, 분리 가능한 예약 하위 요청만 후속 처리 유지
-  - 비창작(F-005): 미지원 분과/의사 요청 시 코비메디 미지원 안내를 우선 반환하도록 검증
-  - 회귀 대응: 기존 dialogue test와 충돌하지 않도록 pending confirmation / 후보 선택의 테스트용 mock 경로를 안전하게 보정
-- 구현: Classification/Extraction Phase(F-006~F-011) 완료
-  - `src/classifier.py`: action enum validator를 유지한 상태로 Ollama `format='json'` 구조화 분류 결과를 rule 기반 추론과 결합
-  - `src/classifier.py`: 명시 분과 / 증상 / 의사명 매핑(이춘영/김만수/원징수) 기반 분과 추정 및 의사명 추출 보강
-  - `src/classifier.py`: 자유문장에서 날짜/시간/분과/고객유형/기존 예약 힌트(target_appointment_hint) 추출 지원
-  - `src/classifier.py`: action별 필수 정보 검사를 `policy_digest.md` 5.1 표에 맞춰 계산하고 누락 시 `clarify`로 폴백
-  - `src/prompts.py`: classification prompt를 doctor_name / customer_type / target_appointment_hint 포함 JSON 스키마로 확장
-  - `src/llm_client.py`: JSON 코드펜스 제거 후 파싱하도록 보강되어 구조화 출력 실패 시에도 안전 폴백 유지
-  - `tests/test_classifier.py`: enum validation, doctor mapping, symptom guidance, extraction, required-info clarify 회귀 테스트 추가
-  - 검증: `python -m pytest tests/test_classifier.py -v`, `python -m pytest tests/ -v` 모두 통과 (60 passed)
-- 구현: Policy Phase(F-015~F-020, F-040) 완료
-  - `src/policy.py`: 시간 관련 보조 함수와 슬롯/정원/대체시간 계산에 `now` 파라미터를 일관되게 전달하도록 보강
-  - `src/policy.py`: modify/cancel/check 검증 시 `storage.find_bookings()`를 우선 조회하는 저장소 진실원천 경로를 추가하고, `ticket.context`성 입력보다 저장소 결과를 우선 사용하도록 정리
-  - `src/policy.py`: 1시간 3명 정원, 정확히 24시간 허용, 23시간 59분 불가, 초진 40분/재진 30분 겹침 계산, 당일 일반 예약 보수 처리, 대체 슬롯 탐색이 모두 동일 정책 함수 안에서 결정론적으로 유지되도록 정리
-  - `tests/test_policy.py`: F-018 저장소 진실원천, stale context 무시, 명시적 `now` 주입(F-040) 회귀 테스트를 추가
-  - 검증: `python -m pytest tests/test_policy.py -v` (13 passed), `python -m pytest tests/ -v` (63 passed)
-- 구현: Dialogue Phase(F-012~F-014) 완료
-  - `src/agent.py`: `session_state.accumulated_slots`를 유지하며 clarify 이후 사용자가 추가로 제공한 분과/날짜/시간을 이전 슬롯과 병합하도록 보강
-  - `src/agent.py`: 예약 요청이 충분하고 정책을 통과하면 항상 `pending_confirmation` 제안 단계(`~로 예약할까요?`)를 반환하고, 사용자 확인(`네`) 이후에만 `storage.create_booking()`으로 영속 저장 후 확정 응답하도록 변경
-  - `src/agent.py`: `run.py`의 단일 턴(batch) 경로에서도 같은 코어를 사용하되, 세션이 없으면 확정 대신 제안 결과만 반환하도록 정렬
-  - `src/agent.py`: modify/cancel/check에서 저장소(`data/bookings.json`)와 현재 입력 후보를 함께 보고, 고객 예약이 2건 이상이면 `pending_candidates`를 세팅해 후속 턴 선택으로 해소하도록 구현
-  - `src/response_builder.py`: 다수 예약 모호성 응답을 "어떤 예약인지 선택해주세요" 형식으로 통일
-  - `tests/test_dialogue.py`: 멀티턴 슬롯 누적, 2단계 예약 확정, 복수 예약 후보 선택, batch 단일 턴 제안 회귀 테스트를 보강
-  - 검증: `python -m pytest tests/ -v` 통과 (63 passed)
+## Current Status
 
-## Next step
-- Phase 6 Persistence 연결 및 저장소 신뢰성 보강 (F-036~F-039)
+### Documentation update completed (2026-03-25)
+- `docs/policy_digest.md` 업데이트 완료
+  - §5.7 **본인/대리인 확인 정책** 신규 추가
+    - 성명+전화번호만으로는 본인/대리인 구분 불가 → 예약 의도 확정 직후 명시적 질문 필수
+    - chat 모드: 예약 의도 확정 후 첫 clarify 턴으로 본인/대리인 확인
+    - batch 모드: 대리 표현 감지 시 is_proxy_booking=true, 없으면 본인으로 간주
+    - is_proxy_booking 플래그는 tickets.json에 기록하지 않음
+  - §6.5 **본인/대리인 판단 불가 시 처리** 신규 추가
+    - 명시적 대리 표현 없으면 본인으로 간주
+    - 판단 불가 시 clarify 질문
+  - §5.6 환자 식별 기본 정책 유지 (전화번호 우선 수집)
+  - §7.3 초진/재진 판정 규칙: 전화번호 기반 조회 명시
 
-## Evaluation notes
-- 현재 gold label은 AI 보조 초안이므로 제출 전 반드시 사람이 최종 검수해야 함
-- 현재 배치 결과를 gold와 비교하면 safety gate 이슈는 완화되었지만, 기존 예약 매칭 부재와 일부 응급 표현 누락으로 일반화 개선 여지가 여전히 큼
-- 다만 F-025 수용기준인 gold_cases 기반 비교 실행 자체는 가능해짐
+- `.ai/harness/features.json` 전면 작성 완료 (v2.1, 이전 빈 파일 대체)
+  - 11개 그룹, 60개 feature 정의
+  - **patient_identity 그룹 신규** (F-031 ~ F-039):
+    - F-031: 예약 시작 시 본인/대리인 여부 확인 ★ (핵심 신규)
+    - F-032: 본인 예약 시 본인 성명+전화번호 수집
+    - F-033: 대리 예약 시 환자 본인 성명+전화번호 수집
+    - F-034: 전화번호 우선 환자 식별
+    - F-035: 초진/재진 저장소 판정
+    - F-036: 동명이인 → 생년월일 clarify
+    - F-037: ticket_id correlation key 전용
+    - F-038: bookings.json에 patient_contact 포함
+    - F-039: 세션 중간 상태로 환자 정보 관리
+  - storage 그룹: F-062 (find_bookings patient_contact 필터), F-063 (resolve 전화번호 우선) 명시
+  - dialogue 그룹: F-043에 is_proxy_booking 슬롯 포함
 
-## Known issues
-- 없음 (현재 테스트는 모두 통과)
-- 참고: `.ai/harness/features.json`의 F-001~F-005는 이번 작업 시작 전부터 이미 `passes=true`로 기록되어 있어 값 유지로 검증을 반영함
-- 참고: `.ai/harness/features.json`의 F-006~F-011 역시 작업 시작 시점에 이미 `passes=true`였으며, 이번 Phase에서는 구현/회귀 검증을 통해 해당 상태를 재확인함
-- 참고: F-015, F-016, F-017, F-019, F-020, F-040은 이전 Phase에서 이미 `passes=true`였고, 현재도 회귀 없이 유지됨
-- 참고: `.ai/harness/features.json`의 F-012~F-014도 작업 시작 시점에 이미 `passes=true`였으나, 이번 Phase에서 실제 dialogue 구현과 회귀 테스트를 완료해 해당 상태를 검증함
+- `.ai/handoff/10_plan.md` 신규 작성 완료
+  - 3가지 핵심 문제 정의 (신원확인, 본인/대리인 구분, 멀티턴 상태관리)
+  - 파이프라인 순서 명시 (safety → classification → extraction → dialogue state merge → storage → policy → cal.com → persist → response)
+  - Phase 0 (환자 식별 기반 확보) 최우선 신규 작업으로 추가
+    - Phase 0a: storage.py 확장 (patient_contact 파라미터)
+    - Phase 0b: dialogue state 확장 (is_proxy_booking 슬롯)
+    - Phase 0c: extraction 확장 (전화번호 추출, 대리 감지 패턴)
+  - storage.py 변경 사양 상세 (find_bookings, resolve_customer_type_from_history)
+  - dialogue state 추가 필드 사양
+  - batch vs chat 처리 원칙 비교표
 
-## Submission readiness
-- policy_digest.md: ready
-- architecture.md: ready (골격)
-- q1_metric_rubric.md: not yet
-- q3_safety.md: not yet
-- demo_evidence.md: not yet
-- final_report.md: not yet
-- Phase 2 safety implementation: ready
-- Phase 3 classification/extraction implementation: ready
-- Phase 4 policy implementation (F-015~F-020, F-040): ready
-- Phase 5 dialogue implementation: ready
+---
+
+## 핵심 설계 결정: 본인/대리인 구분
+
+### 문제
+성명과 전화번호만으로는 예약을 진행하는 사람이 환자 본인인지 대리인인지 알 수 없다.
+
+### 결정
+1. 예약 의도 확정 직후, 환자 정보 수집 전에 **명시적 본인/대리인 확인 질문** 수행
+2. `is_proxy_booking` 플래그를 dialogue state에 추가
+3. 분기:
+   - 본인 → 본인 성명+전화번호 수집
+   - 대리인 → 환자 본인 성명+전화번호 수집 (대리인 정보는 수집 안 함)
+4. batch 모드에서는 메시지 패턴으로 감지. 감지 불가 시 본인으로 간주
+
+### 영향 범위
+- `src/agent.py`: dialogue state에 is_proxy_booking, patient_name, patient_contact 슬롯 추가
+- `src/storage.py`: find_bookings(), resolve_customer_type_from_history()에 patient_contact 파라미터 추가
+- `src/prompts.py` (있다면): 전화번호 추출, 대리 감지 패턴 추가
+
+---
+
+## 핵심 설계 결정: 전화번호 기반 환자 식별
+
+### 문제
+`tickets.json`에 전화번호 없음 → 성명만으로 동명이인 식별 불가, 초진/재진 판정 불확실
+
+### 결정
+1. 대화에서 전화번호를 수집해 세션 상태(`patient_contact`)에 저장
+2. `bookings.json` 레코드에 `patient_contact` 필드 포함
+3. 초진/재진 판정은 전화번호 우선으로 `data/bookings.json` 조회
+4. 전화번호 없으면 이름+생년월일로 폴백, 그것도 없으면 이름 단독(유일한 경우만)
+
+### tickets.json 스키마는 변경하지 않음
+- tickets.json은 입력 계약 불변 원칙(policy_digest §0.2) 유지
+- 추가 정보는 대화에서 수집하거나 bookings.json에서 조회
+
+---
+
+## Reusable Implementation Baseline
+
+### Still Reusable (변경 불필요)
+- safety gate 선행 실행 구조
+- action enum validation (7개)
+- doctor/department/symptom 기본 추론
+- confirmation 단계 분리 구조
+- batch/chat 공통 agent core 구조
+- policy.py 기본 구조 (24시간, 정원, 슬롯 겹침)
+
+### Must Be Implemented / Reopened
+
+#### Phase 0 (신규 — 최우선)
+- `storage.find_bookings()`: patient_contact 파라미터 추가
+- `storage.resolve_customer_type_from_history()`: patient_contact 우선 조회 확장
+- dialogue state: is_proxy_booking, patient_name, patient_contact 슬롯 추가
+- chat 모드: 예약 의도 확정 후 본인/대리인 확인 질문 생성
+- extraction: 전화번호 패턴 추출, 대리 예약 감지 패턴 강화
+
+#### Phase 1 (재오픈)
+- pending_missing_info_queue → 우선순위: is_proxy_booking → patient_contact → dept/date/time → birth_date
+- clarify_turn_count 4단계 상한
+- 누적 슬롯 유지 및 매 턴 재평가
+
+#### Phase 2 (재오픈)
+- 운영시간/점심시간/휴진일 정책 완전 반영
+- 슬롯 불가 시 대체안 제시
+
+#### Phase 3 (재오픈)
+- 보험/비용 문의 escalate
+- 의사 개인정보 요청 escalate
+- 타 환자 정보 요청 reject
+
+#### Phase 4 (재오픈)
+- confirmation 직전 fresh storage recheck
+- 저장 실패 시 거짓 성공 금지
+
+#### Phase 5 (신규)
+- KPI/constraint 이벤트 계측
+- 문서 산출물 완성
+
+---
+
+## New Priorities
+
+### Priority 1. Hard Fail 방지
+- 의료 상담 오답 0건 유지 (Unsafe Medical Answer Rate = 0%)
+- 허위 성공/잘못된 예약 확정/개인정보 노출 방지
+
+### Priority 2. 불필요한 Escalation 축소
+- 본인/대리인 → 환자 정보 → 예약 정보 → 슬롯 불가 → 대체안 순서로 clarify 처리
+- 사람이 꼭 필요한 케이스만 escalate
+
+### Priority 3. 성공 자동화율 향상
+- 멀티턴 clarify 안정화로 recoverable case 자동 처리
+
+---
+
+## Known Issues (Current Codebase)
+
+- `storage.find_bookings()`: patient_contact 필터 미지원 → 전화번호 우선 식별 불가
+- `storage.resolve_customer_type_from_history()`: name+birth_date 기반만 지원, patient_contact 우선 조회 없음
+- dialogue state: is_proxy_booking 슬롯 없음 → 본인/대리인 구분 불가
+- chat 모드: 본인/대리인 확인 질문 생성 로직 없음
+- clarify 멀티턴: 정책상 요구하는 4단계 누적 상태머신 구현 부족
+- 운영시간/점심시간/휴진일: policy.py에 완전 반영 안 됨
+- KPI/constraint 이벤트 런타임 집계 없음
+
+---
+
+## Submission Readiness
+
+| 산출물 | 상태 |
+| --- | --- |
+| `docs/policy_digest.md` | ✅ 업데이트 완료 (본인/대리인 정책 포함) |
+| `.ai/harness/features.json` | ✅ 신규 작성 완료 |
+| `.ai/handoff/10_plan.md` | ✅ 신규 작성 완료 |
+| `.ai/harness/progress.md` | ✅ 업데이트 완료 |
+| `docs/q1_metric_rubric.md` | ⬜ 미작성 |
+| `docs/q3_safety.md` | ⬜ 미작성 |
+| `docs/final_report.md` | ⬜ 미업데이트 |
+| 코드 구현 (Phase 0~5) | ⬜ 미시작 |
+
+## Practical Interpretation
+
+현재 프로젝트 상태:
+
+> **정책/기능/계획 문서가 새 기준으로 정렬 완료.  
+> Phase 0 (storage.py 전화번호 필터 + dialogue state 본인/대리인 슬롯) 부터 구현 착수 필요.**
