@@ -100,15 +100,15 @@
 
 ## Current Status
 
-- Storage truth-source hardening 완료
-  - `src/storage.py`가 bookings.json 기준 최종 재검증 및 충돌 예외를 지원
-  - 전화번호 우선 식별, patient 필드 저장, 저장 실패/충돌 시 거짓 성공 금지 요구사항 반영 완료
-  - 저장소 관련 feature(`F-061 ~ F-067`) 상태를 harness에 반영 완료
+- Safety gate / classifier hardening 완료
+  - `src/classifier.py`의 `safety_check()`가 classification 전에 선행되며, 의료 상담/목적 외 사용/인젝션/타 환자 정보 요청 reject 및 응급/민원/운영 문의 escalate 규칙을 반영
+  - 의료+예약 혼합 요청 분리, 증상 기반 분과 추천(진단 금지), 후속 신원 응답 예외 처리까지 테스트로 검증 완료
+  - safety 관련 feature(`F-001 ~ F-010`)와 classifier/extraction 관련 feature(`F-011 ~ F-030`) 상태를 harness에 반영 완료
 
 - Next step
   - `src/agent.py` 대화 상태에 `is_proxy_booking`, `patient_name`, `patient_contact`를 본격 반영하여 본인/대리인 확인 및 세션 중간 상태 수집 흐름을 구현
   - confirmation 직전 storage fresh recheck를 agent 예약 확정 흐름과 직접 연결
-  - dialogue state / extraction 중심의 Phase 0b~1 작업 계속 진행
+  - dialogue / patient identity 중심의 후속 Phase 구현을 계속 진행
 
 ### Documentation update completed (2026-03-25)
 - `docs/policy_digest.md` 업데이트 완료
