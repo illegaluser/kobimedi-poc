@@ -29,12 +29,7 @@
   - `python golden_eval/eval.py results.json golden_eval/gold_cases.json` 실행 가능 확인
 - 검증: `pytest tests/ -v` 55건 전체 통과
 - 평가 갱신: safety gate 보정 후 golden eval action 정확도 32.0% → 60.0% 개선, reject 재현율 100.0% 유지
-- feature 정렬 재작업 완료
-  - 과제 원문(Q2: 예약 접수/변경/취소 자동화) 기준으로 feature 모델을 재정렬
-  - mock 조회 중심 정의를 줄이고, 실제 파일 기반 예약 기록 영속화(F-036~F-039) 요구를 추가
-  - gold 케이스 포맷 보존 요구(F-041) 및 시간 의존 테스트 가능성(now/freezegun, F-040)을 명시
-  - 기존 F-018 acceptance를 `ticket.context` 의존이 아닌 실제 예약 저장소 기준 검증으로 재정의
-- 추적: `.ai/harness/features.json`에서 F-025/F-026, F-040/F-041 상태 반영
+- 추적: `.ai/harness/features.json`에서 F-025/F-026 passes=true 반영
 
 ## Next step
 - Q4 cal.com 연동(F-028~F-035) 구현
@@ -44,10 +39,6 @@
 - 현재 gold label은 AI 보조 초안이므로 제출 전 반드시 사람이 최종 검수해야 함
 - 현재 배치 결과를 gold와 비교하면 safety gate 이슈는 완화되었지만, 기존 예약 매칭 부재와 일부 응급 표현 누락으로 일반화 개선 여지가 여전히 큼
 - 다만 F-025 수용기준인 gold_cases 기반 비교 실행 자체는 가능해짐
-
-## Feature model notes
-- request.md와 비교했을 때 가장 큰 누락은 "업무 자동화"를 뒷받침하는 영속 저장소 요구였다.
-- 따라서 현재 feature 목록은 안전성/분류/정책뿐 아니라 실제 예약 기록의 생성·변경·취소·조회 반영을 별도 기능으로 관리한다.
 
 ## Known issues
 - 없음 (현재 테스트는 모두 통과)

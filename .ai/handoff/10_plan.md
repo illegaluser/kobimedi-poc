@@ -1,402 +1,302 @@
 # 상세 구현 설계 계획서
 
-기준 문서: `.ai/handoff/00_request.md`, `AGENTS.md`, `.ai/harness/features.json`, `docs/policy_digest.md`, `.ai/harness/progress.md`  
-목표: `features.json`의 35개 기능을 구현하기 위한 상세 설계를 정리한다.  
+기준 문서: `.ai/handoff/00_request.md`, `.ai/harness/features.json`, `docs/policy_digest.md`, `docs/architecture.md`, `AGENTS.md`, `.ai/harness/progress.md`  
+목표: request.md와 features.json을 만족하는 **최종 구현 계획**을 세밀하게 정의한다. 이 문서는 이후 실제 코딩의 기준 문서다.  
 우선순위: **safety > correctness > policy compliance > demo polish > Q4**
 
-추가 고정 조건:
+이 문서는 단순 일정표가 아니라 다음을 동시에 만족해야 한다.
 
-- 런타임 LLM은 **Ollama 로컬 모델 `qwen3-coder:30b`** 를 사용한다.
-- 호출 방식은 `from ollama import chat` 이다.
-- 구조화 출력은 반드시 `format='json'` 을 사용한다.
-- 시간 의존 로직은 `agent.py` 핵심 함수에서 `now` 파라미터를 받는다.
-
-```python
-def process_ticket(ticket, now=None):
-    if now is None:
-        now = datetime.now(timezone.utc)
-```
-
-- Q4 cal.com 연동은 **정책 검사 후, 응답 생성 전** 단계에 위치한다.
-- cal.com 연동은 `src/calcom_client.py`에 격리하며, 설정이 없으면 graceful skip 한다.
+1. 구현자가 바로 코딩에 착수할 수 있을 정도로 **구체적일 것**
+2. `docs/policy_digest.md`, `docs/architecture.md`와 **동일한 사실만 말할 것**
+3. 예외사항, 실패 처리, 테스트 전략, 데이터 계약까지 포함할 것
+4. request.md의 Hard Constraints와 AGENTS.md의 Non-Negotiables를 **어느 항목보다 우선**할 것
 
 ---
 
-## 1. 구현 순서 (Phase별, features.json ID 기준)
+## 0. 고정 전제와 절대 불변 조건
 
-### Phase 2: F-001~F-005 (safety)
-- F-001 의료 상담 요청을 `reject`로 차단
-- F-002 목적 외 사용(잡담/인젝션)을 `reject`로 차단
-- F-003 급성 통증/응급을 `escalate`로 처리
-- F-004 의료+예약 혼합 요청을 안전하게 분리 처리
-- F-005 확인되지 않은 분과/의사/정책/가용시간을 지어내지 않음
+아래 항목은 구현 중 절대 바뀌면 안 된다.
 
-이 단계는 Hard Constraint와 AGENTS.md의 safety-first 규칙 때문에 최우선이다. 이후 단계가 추가되더라도 unsafe 요청은 이 단계에서 종결되도록 설계한다.
+### 0.1 파이프라인 순서
+반드시 다음 순서를 유지한다.
 
-### Phase 3: F-006~F-011 (classification + extraction)
-- F-006 7개 action taxonomy 정확 분류
-- F-007 분과 올바른 추정
-- F-008 증상 기반 분과 안내, 의료 진단 금지
-- F-009 의사명 요청을 분과/의사 매핑으로 해석
-- F-010 자유문장에서 예약 핵심 슬롯 정보 추출
-- F-011 정보 부족 시 `clarify` 반환
+1. **safety gate**
+2. **classification**
+3. **extraction**
+4. **policy check**
+5. **(Q4) cal.com**
+6. **response build**
 
-안전 요청만 남긴 뒤 자연어를 구조화 데이터로 바꾸는 단계다. extraction 결과가 다음 policy.py의 결정론 판정 입력이 된다.
+### 0.2 공통 로직 원칙
+- `chat.py`와 `run.py`는 모두 **같은 `src/agent.py` 코어 로직**을 호출한다.
+- chat/run이 서로 다른 정책 판단, 서로 다른 safety 분기, 서로 다른 JSON 스키마를 가지면 안 된다.
 
-### Phase 4: F-015~F-020 (policy)
-- F-015 1시간당 최대 3명 제한
-- F-016 당일 변경/취소 금지와 24시간 규칙
-- F-017 초진 40분 / 재진 30분 슬롯
-- F-018 기존 예약 유무와 대상 식별 정합성 검증
-- F-019 당일 신규 예약 일반/응급 구분 보수 처리
-- F-020 슬롯 불가 시 대체 시간 또는 대체 처리 안내
+### 0.3 Action Enum 고정값
+다음 7개를 **그대로** 사용한다.
 
-이 단계는 LLM이 아니라 순수 결정론으로 구현한다. classification/extraction 결과를 받아 허용·불가·대체안 여부를 확정한다.
+- `book_appointment`
+- `modify_appointment`
+- `cancel_appointment`
+- `check_appointment`
+- `clarify`
+- `escalate`
+- `reject`
 
-### Phase 5: F-012~F-014 (dialogue)
-- F-012 clarify 이후 대화 컨텍스트 유지
-- F-013 예약 제안 후 사용자 확인 2단계 흐름 지원
-- F-014 여러 기존 예약 또는 불명확한 대상의 모호성 해소
+### 0.4 금지 사항
+- 의료 판단 생성
+- action enum 축약/변형
+- chat/run 별도 로직
+- 확인되지 않은 정책/가용시간/예약 존재 여부 생성
+- confidence/reasoning 하드코딩
 
-멀티턴은 core 분류/정책이 안정화된 뒤 붙여야 한다. session_state 중심으로 pending intent와 missing fields를 누적 관리한다.
-
-### Phase 6: F-021~F-024 (runtime)
-- F-021 `chat.py`가 `src/agent.py` 공통 로직 호출 + 멀티턴 지원
-- F-022 `run.py`가 `src/agent.py` 공통 로직 호출 + 배치 처리
-- F-023 배치 JSON이 과제 예시 키와 의미 정합성 충족
-- F-024 `confidence`/`reasoning`을 실제 판단 근거로 생성
-
-입출력 어댑터는 이 단계에서 정리한다. chat/run이 서로 다른 판단 로직을 가지지 않도록 core를 완전히 공유한다.
-
-### Phase 7: F-025~F-026 (reliability + evaluation)
-- F-025 golden_eval 기반 일반화 점검 가능
-- F-026 Ollama 호출 실패/비정상 JSON 안전 폴백 제공
-
-기능이 동작하더라도 실패 내성과 평가 루프가 없으면 PoC로 불안정하다. 특히 LLM 실패는 unsafe 허용 없이 `clarify/reject`로 안전 복구해야 한다.
-
-### Phase 8: F-028~F-035 (Q4 cal.com)
-- F-028 cal.com 환경설정 로드
-- F-029 3개 분과를 Event Type으로 정확히 매핑
-- F-030 `book_appointment` 요청 시 available slots 조회
-- F-031 가용 슬롯 제안 기반 2단계 예약 흐름
-- F-032 사용자 확인 후 실제 booking 생성
-- F-033 cal.com API 실패 시 거짓 성공 없이 안전 복구
-- F-034 `chat.py`와 `run.py`가 동일 cal.com 연동 Agent 로직 공유
-- F-035 Q4 외부 준비사항과 Event Type 체크리스트 문서 반영
-
-Q4는 선택 과제이므로 필수 기능 안정화 후 붙인다. 다만 연결 위치는 반드시 `policy 후, response 전`으로 고정한다.
-
-### Phase 9: F-027 (documentation)
-- F-027 `final_report.md`가 필수 제출 항목을 모두 포함
-
-문서는 실제 구현 결과와 데모 증빙이 정리된 뒤 마무리한다.
+### 0.5 LLM/연동 고정 조건
+- LLM: **Ollama `qwen3-coder:30b`**
+- 구조화 출력: 반드시 `format='json'`
+- cal.com 연동 로직: `src/calcom_client.py`
+- 시간 의존 핵심 로직: `now` 파라미터 주입 가능해야 함
 
 ---
 
-## 2. 각 기능의 구현 방법 (파일명 + 핵심 함수 시그니처 + 로직 1~2문장)
+## 1. 목표 상태 요약
 
-### Phase 2: Safety
+최종 구현은 아래 동작을 만족해야 한다.
 
-#### F-001 의료 상담 요청 차단
-- **파일명**: `src/classifier.py`, `src/prompts.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def classify_safety(message: str) -> dict:`
-  - `def process_ticket(ticket: dict, all_appointments: list | None = None, existing_appointment: dict | None = None, session_state: dict | None = None, now: datetime | None = None) -> dict:`
-- **로직**: safety prompt에서 진단/약물/치료 조언 여부를 JSON으로 분류한다. `medical_advice`이면 agent는 즉시 `reject` 응답을 반환하고 이후 단계로 진행하지 않는다.
-
-#### F-002 목적 외 사용/인젝션 차단
-- **파일명**: `src/classifier.py`, `src/prompts.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def classify_safety(message: str) -> dict:`
-- **로직**: 날씨/잡담/타 서비스 문의와 프롬프트 인젝션을 `off_topic` 또는 별도 unsafe subtype으로 판정한다. agent는 모두 `reject`로 처리하고 내부 지침/프롬프트는 공개하지 않는다.
-
-#### F-003 급성 통증/응급 escalate
-- **파일명**: `src/classifier.py`, `src/agent.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def classify_safety(message: str) -> dict:`
-  - `def build_escalation_response(ticket: dict, safety_result: dict) -> dict:`
-- **로직**: 급성 통증/응급/즉시 진료 요구를 safety 단계에서 `emergency`로 식별한다. response_builder는 자동 예약 대신 상담원 또는 의사 확인 필요 안내를 만든다.
-
-#### F-004 의료+예약 혼합 요청 분리 처리
-- **파일명**: `src/classifier.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def classify_safety(message: str) -> dict:`
-  - `def process_ticket(..., session_state: dict | None = None, now: datetime | None = None) -> dict:`
-- **로직**: safety 결과에 `contains_booking_subrequest`와 `safe_booking_text`를 담아 예약 부분만 후속 처리할 수 있게 한다. 의료 판단 부분은 거부하되 예약 가능한 부분만 classification으로 넘기거나, 안전하게 처리 불가 시 전체 `reject`로 종료한다.
-
-#### F-005 확인되지 않은 정보 비창작
-- **파일명**: `src/classifier.py`, `src/policy.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def validate_department(raw_department: str | None) -> str | None:`
-  - `def build_response(..., reasoning_parts: list[str], confidence: float, **kwargs) -> dict:`
-- **로직**: 허용된 분과/의사/정책 값만 통과시키고 불명확 값은 `None` 또는 `clarify`로 강등한다. response_builder는 확인되지 않은 가용시간이나 정책을 문장에 넣지 않는다.
-
-### Phase 3: Classification + Extraction
-
-#### F-006 7개 action 정확 분류
-- **파일명**: `src/classifier.py`, `src/llm_client.py`, `src/prompts.py`
-- **핵심 함수 시그니처**:
-  - `def classify_intent(message: str, context: dict | None = None) -> dict:`
-  - `def chat_json(system_prompt: str, user_prompt: str, schema_hint: dict | None = None) -> dict:`
-- **로직**: action 후보를 과제 원문 7개 enum으로 제한한 prompt를 사용한다. validator는 enum 밖의 값이나 누락 응답을 `clarify`로 폴백한다.
-
-#### F-007 분과 추정
-- **파일명**: `src/classifier.py`, `src/utils.py`
-- **핵심 함수 시그니처**:
-  - `def infer_department(message: str, extracted: dict) -> str | None:`
-- **로직**: 명시 분과가 있으면 그대로 사용하고, 없으면 증상 키워드·의사명·ticket context를 근거로 추정한다. 확신이 부족하면 분과를 비워 두고 clarify로 넘긴다.
-
-#### F-008 증상 기반 분과 안내, 의료 진단 금지
-- **파일명**: `src/classifier.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def classify_intent(message: str, context: dict | None = None) -> dict:`
-  - `def build_clarify_response(ticket: dict, intent_result: dict, missing_fields: list[str]) -> dict:`
-- **로직**: 증상은 질병 판단이 아니라 분과 추천 신호로만 사용한다. 응답은 “어느 과 예약을 도와드릴 수 있다” 수준으로 제한하고, 진단명/치료법은 생성하지 않는다.
-
-#### F-009 의사명 요청의 분과 매핑
-- **파일명**: `src/classifier.py`, `src/utils.py`
-- **핵심 함수 시그니처**:
-  - `def map_doctor_to_department(name: str | None) -> str | None:`
-- **로직**: 이춘영→이비인후과, 김만수→내과, 원징수→정형외과의 고정 매핑을 사용한다. 없는 의사명은 추정하지 않고 `clarify` 또는 처리 불가 안내로 전환한다.
-
-#### F-010 예약 핵심 슬롯 정보 추출
-- **파일명**: `src/classifier.py`, `src/llm_client.py`, `src/utils.py`
-- **핵심 함수 시그니처**:
-  - `def extract_entities(message: str, ticket: dict, session_state: dict | None = None, now: datetime | None = None) -> dict:`
-  - `def normalize_datetime_phrase(raw_text: str, now: datetime) -> str | None:`
-- **로직**: 날짜/시간/분과/의사명/초진·재진/대상 예약 식별 정보를 구조화한다. 상대 시각 표현은 `now` 기준으로 해석하여 freezegun 테스트와 일치시킨다.
-
-#### F-011 정보 부족 시 clarify
-- **파일명**: `src/agent.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def determine_missing_fields(action: str, extracted: dict, ticket: dict, existing_appointment: dict | None = None) -> list[str]:`
-  - `def build_clarify_response(ticket: dict, intent_result: dict, missing_fields: list[str]) -> dict:`
-- **로직**: action별 필수 필드를 정의하고 누락 항목을 계산한다. 누락이 있으면 policy 전에 `clarify` 응답으로 전환한다.
-
-### Phase 4: Policy
-
-#### F-015 1시간당 최대 3명 제한
-- **파일명**: `src/policy.py`
-- **핵심 함수 시그니처**:
-  - `def check_hourly_capacity(requested_start: datetime, all_appointments: list[dict]) -> tuple[bool, str | None]:`
-- **로직**: 요청 시작 시각이 속한 1시간 윈도우의 예약 수를 계산한다. 4번째 예약이면 자동 확정하지 않고 대체안 단계로 넘긴다.
-
-#### F-016 24시간 변경/취소 규칙
-- **파일명**: `src/policy.py`
-- **핵심 함수 시그니처**:
-  - `def is_change_allowed(appointment_time_str: str, now: datetime) -> bool:`
-  - `def apply_policy(intent: dict, existing_appointment: dict | None, all_appointments: list[dict], now: datetime) -> dict:`
-- **로직**: `now <= 예약시각 - 24시간`이면 허용, 그보다 늦으면 불가로 처리한다. 정확히 24시간 전은 허용 경계값으로 고정한다.
-
-#### F-017 초진 40분 / 재진 30분 슬롯
-- **파일명**: `src/policy.py`
-- **핵심 함수 시그니처**:
-  - `def get_appointment_duration(customer_type: str | None) -> int | None:`
-  - `def is_slot_available(requested_start_str: str, customer_type: str, existing_appointments: list[dict]) -> tuple[bool, str]:`
-- **로직**: 초진 40분, 재진 30분 기준으로 겹침 여부를 계산한다. `customer_type`이 없으면 availability 계산을 하지 않고 clarify가 필요하다는 상태로 보낸다.
-
-#### F-018 기존 예약 유무/대상 식별 정합성
-- **파일명**: `src/policy.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def validate_existing_appointment(action: str, existing_appointment: dict | None, candidate_appointments: list[dict] | None = None) -> dict:`
-- **로직**: modify/cancel/check는 기존 예약이 있어야 한다. 예약이 없거나 후보가 여러 건이면 바로 거절하지 말고 clarify 가능한 상태를 반환한다.
-
-#### F-019 당일 신규 예약 보수 처리
-- **파일명**: `src/policy.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def evaluate_same_day_booking(intent: dict, now: datetime) -> dict:`
-- **로직**: 일반 당일 신규 예약은 자동 확정하지 않고 재확인 또는 대체 시간 안내로 보낸다. 응급은 safety 단계에서 이미 `escalate`되므로 policy는 일반 당일 예약만 보수 처리한다.
-
-#### F-020 슬롯 불가 시 대체 시간/대체 처리 안내
-- **파일명**: `src/policy.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def suggest_alternative_slots(requested_start_str: str, customer_type: str, all_appointments: list[dict], limit: int = 3) -> list[str]:`
-  - `def build_policy_response(ticket: dict, policy_result: dict, intent_result: dict) -> dict:`
-- **로직**: 요청 슬롯이 불가하면 인접한 시간대 후보를 계산한다. response_builder는 단순 불가 통지 대신 대체 시간이나 후속 절차를 함께 안내한다.
-
-### Phase 5: Dialogue
-
-#### F-012 clarify 후 대화 컨텍스트 유지
-- **파일명**: `src/agent.py`, `chat.py`
-- **핵심 함수 시그니처**:
-  - `def merge_session_context(ticket: dict, session_state: dict | None) -> dict:`
-  - `def process_ticket(..., session_state: dict | None = None, now: datetime | None = None) -> dict:`
-- **로직**: session_state에 마지막 action 후보, 누락 필드, 추출된 entities를 저장한다. 후속 입력이 들어오면 이전 pending context와 새 메시지를 합쳐 재처리한다.
-
-#### F-013 예약 2단계 확인 흐름
-- **파일명**: `src/agent.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def handle_confirmation_step(ticket: dict, session_state: dict | None, policy_result: dict) -> dict:`
-  - `def build_confirmation_response(ticket: dict, intent_result: dict, slot_payload: dict) -> dict:`
-- **로직**: 첫 턴에서는 예약 후보 또는 가용 슬롯을 제안하고 `pending_confirmation` 상태를 저장한다. 사용자가 동의하면 같은 agent core가 최종 확정 또는 Q4 booking 단계로 이어진다.
-
-#### F-014 여러 기존 예약/불명확 대상 모호성 해소
-- **파일명**: `src/agent.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def resolve_target_appointment(ticket: dict, candidate_appointments: list[dict]) -> dict:`
-- **로직**: 기존 예약이 여러 건이면 날짜/분과/시간 기준으로 후보를 좁힌다. 한 건으로 확정되지 않으면 `clarify` 상태를 유지하고 재질문한다.
-
-### Phase 6: Runtime
-
-#### F-021 chat.py 공통 agent 로직 + 멀티턴
-- **파일명**: `chat.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def main() -> None:`
-  - `def process_ticket(..., session_state: dict | None = None, now: datetime | None = None) -> dict:`
-- **로직**: chat.py는 CLI 입출력과 session_state 저장만 담당한다. 실제 판단은 모두 `process_ticket`로 위임한다.
-
-#### F-022 run.py 공통 agent 로직 배치 처리
-- **파일명**: `run.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def run_batch(input_path: str, output_path: str, now: datetime | None = None) -> list[dict]:`
-- **로직**: run.py는 입력 JSON을 순회하며 각 ticket을 `process_ticket`에 전달한다. 배치도 동일 core를 사용해 chat와 판단 일관성을 보장한다.
-
-#### F-023 배치 JSON 스키마 정합성
-- **파일명**: `src/response_builder.py`, `run.py`
-- **핵심 함수 시그니처**:
-  - `def build_batch_result(ticket: dict, action: str, classified_intent: str, department: str | None, response: str, confidence: float, reasoning: str) -> dict:`
-- **로직**: 과제 예시의 `ticket_id`, `classified_intent`, `department`, `action`, `response`, `confidence`, `reasoning` 키를 항상 채운다. chat 모드도 내부적으로 동일 payload를 공유해 스키마 드리프트를 막는다.
-
-#### F-024 confidence/reasoning 근거 기반 생성
-- **파일명**: `src/response_builder.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def compute_confidence(safety_result: dict, intent_result: dict, policy_result: dict) -> float:`
-  - `def build_reasoning(safety_result: dict, intent_result: dict, extraction_result: dict, policy_result: dict) -> str:`
-- **로직**: confidence는 rule-based score로 계산한다. reasoning은 실제 안전 판정, 추출 성공, 정책 검토 결과를 조합하여 생성하고 고정 문구 하드코딩을 피한다.
-
-### Phase 7: Reliability + Evaluation
-
-#### F-025 golden_eval 일반화 점검
-- **파일명**: `golden_eval/eval.py`, `tests/test_generalization.py`
-- **핵심 함수 시그니처**:
-  - `def evaluate_gold_cases(gold_path: str, now: datetime | None = None) -> dict:`
-- **로직**: gold case를 agent core에 통과시켜 expected action/department와 비교한다. accuracy 외에 safety miss와 hard fail을 별도로 집계한다.
-
-#### F-026 Ollama 실패/비정상 JSON 폴백
-- **파일명**: `src/llm_client.py`, `src/classifier.py`
-- **핵심 함수 시그니처**:
-  - `def chat_json(system_prompt: str, user_prompt: str, schema_hint: dict | None = None) -> dict:`
-  - `def safe_parse_json(raw_content: str) -> dict | None:`
-- **로직**: `from ollama import chat` 호출을 한 곳에 모으고 JSON decode error, timeout, connection failure를 표준 에러코드로 변환한다. classifier는 이를 받아 unsafe 허용 없이 `clarify` 또는 `reject`로 복구한다.
-
-### Phase 8: Q4 cal.com
-
-#### F-028 cal.com 환경설정 로드
-- **파일명**: `src/calcom_client.py`
-- **핵심 함수 시그니처**:
-  - `def load_calcom_config() -> dict:`
-- **로직**: API key, base URL, username, event type 식별자를 env에서 읽고 누락 여부를 검사한다. 설정이 없으면 `enabled=False`를 반환해 graceful skip 한다.
-
-#### F-029 분과 ↔ Event Type 정확 매핑
-- **파일명**: `src/calcom_client.py`, `src/utils.py`
-- **핵심 함수 시그니처**:
-  - `def map_department_to_event_type(department: str) -> str | None:`
-- **로직**: 이비인후과→`ent-consultation`, 내과→`internal-medicine`, 정형외과→`orthopedics` 매핑을 고정 테이블로 둔다. 허용되지 않은 분과는 API 호출 전에 차단한다.
-
-#### F-030 available slots 조회
-- **파일명**: `src/calcom_client.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def get_available_slots(department: str, requested_date: str, customer_type: str, config: dict) -> dict:`
-- **로직**: policy를 통과한 `book_appointment` 요청만 available slots API로 보낸다. 응답은 agent가 쓰기 쉬운 normalized slot list로 변환한다.
-
-#### F-031 가용 슬롯 제안 기반 2단계 흐름
-- **파일명**: `src/agent.py`, `src/response_builder.py`, `src/calcom_client.py`
-- **핵심 함수 시그니처**:
-  - `def handle_booking_with_calcom(ticket: dict, intent_result: dict, policy_result: dict, session_state: dict | None) -> dict:`
-- **로직**: cal.com이 활성화되어 있으면 조회된 slot 후보를 사용자에게 제안하고 선택 상태를 세션에 저장한다. 다음 턴에서 사용자가 slot을 고르면 booking 생성 단계로 이동한다.
-
-#### F-032 실제 booking 생성
-- **파일명**: `src/calcom_client.py`, `src/agent.py`
-- **핵심 함수 시그니처**:
-  - `def create_booking(slot_payload: dict, ticket: dict, config: dict) -> dict:`
-- **로직**: 사용자가 확인한 slot에 대해 booking API를 호출하고 booking id/start time/event info를 정규화해 반환한다. 성공 시 response_builder가 실제 예약 완료 응답을 생성한다.
-
-#### F-033 cal.com 실패 시 안전 폴백
-- **파일명**: `src/calcom_client.py`, `src/agent.py`, `src/response_builder.py`
-- **핵심 함수 시그니처**:
-  - `def normalize_calcom_error(exc: Exception | dict) -> dict:`
-- **로직**: 설정 누락, slot 조회 실패, booking 실패를 명시적 오류코드로 정규화한다. agent는 거짓 성공을 반환하지 않고 `clarify`, `escalate`, 또는 자동 연동 불가 안내로 복구한다.
-
-#### F-034 chat/run 공통 cal.com 로직 공유
-- **파일명**: `src/agent.py`, `chat.py`, `run.py`
-- **핵심 함수 시그니처**:
-  - `def process_ticket(..., session_state: dict | None = None, now: datetime | None = None) -> dict:`
-- **로직**: chat와 run은 cal.com API를 직접 호출하지 않고 모두 `agent.py`를 통해 같은 흐름을 사용한다. Q4 활성 여부, graceful skip, slot 조회, booking 생성이 한 곳에서 관리된다.
-
-#### F-035 Q4 준비사항 문서화
-- **파일명**: `docs/architecture.md`, `docs/final_report.md`
-- **핵심 함수 시그니처**: 문서 기능이므로 코드 시그니처 없음
-- **로직**: cal.com 가입, API key 설정, Event Type 3개 생성, 테스트 방법, 캘린더 스크린샷 확보 절차를 체크리스트로 문서화한다.
-
-### Phase 9: Documentation
-
-#### F-027 final_report.md 필수 제출 항목 포함
-- **파일명**: `docs/final_report.md`, `docs/q1_metric_rubric.md`, `docs/q3_safety.md`, `docs/demo_evidence.md`
-- **핵심 함수 시그니처**: 문서 기능이므로 코드 시그니처 없음
-- **로직**: Q1 metric rubric, Q2 아키텍처, 데모 증빙, Q3 안전 대응, 사용 AI 도구 내역을 빠짐없이 포함한다. action taxonomy와 정책 설명은 코드 설계와 동일하게 맞춘다.
+1. unsafe 요청은 예약 흐름에 들어가기 전에 차단된다.
+2. 안전한 요청은 7개 action 중 하나로 분류되고, 예약에 필요한 구조화 정보가 추출된다.
+3. 숫자/시간/정원/24시간/기존 예약 판정은 `src/policy.py`가 결정론적으로 처리한다.
+4. 예약 상태는 파일 기반 영속 저장소를 진실원천으로 사용한다.
+5. chat는 멀티턴 clarify/확인 흐름을 지원하고, run은 같은 로직으로 배치 처리한다.
+6. 결과 JSON은 과제 예시 키를 유지하며, confidence/reasoning은 실제 파이프라인 근거로 생성된다.
+7. Q4 활성 시 policy 이후 cal.com slot 조회와 booking 생성이 붙는다.
 
 ---
 
-## 3. `src/` 모듈 간 호출 관계
+## 2. 현재 코드베이스 대비 핵심 갭 분석
+
+현재 진행 상태(`.ai/harness/progress.md`)를 고려할 때, 설계상 특히 보완이 필요한 부분은 다음과 같다.
+
+### 2.1 이미 상당 부분 있는 영역
+- safety-first 제어 흐름
+- classifier / llm fallback 기본 구조
+- policy 엔진 기본 구조
+- chat 멀티턴 세션 골격
+- batch JSON 기본 스키마
+- confidence/reasoning 동적 산출 골격
+
+### 2.2 여전히 설계/구현 보강이 필요한 영역
+1. **F-004 혼합 요청 분리 처리의 명시적 데이터 계약**
+2. **F-018 / F-036 / F-037 / F-038 / F-039 저장소 진실원천화**
+3. **Q4(cal.com) 설계 및 실패 처리 세부화**
+4. **문서(F-027, F-035)와 구현 계획의 완전한 정렬**
+5. **테스트 축에 storage / cal.com / edge case mapping 보강**
+
+즉, 이후 코딩은 “분류기 만들기”보다 **저장소·정책·대화상태·외부연동을 한 시스템으로 엮는 작업**이 핵심이다.
+
+---
+
+## 3. 기능 맵 (features.json 전체 반영)
+
+아래는 features.json의 전체 기능을 구현 단위로 다시 정렬한 것이다.  
+이 표는 이후 코딩/테스트/문서화의 기준이며, 빠뜨린 기능이 없어야 한다.
+
+### 3.1 Safety
+| ID | 목표 | 구현 핵심 |
+| --- | --- | --- |
+| F-001 | 의료 상담 요청 reject | safety rule + LLM fallback |
+| F-002 | 목적 외 사용/인젝션 reject | keyword rule + LLM fallback |
+| F-003 | 급성 통증/응급 escalate | safety stage short-circuit |
+| F-004 | 의료+예약 혼합 요청 분리 | safe booking subrequest 계약 도입 |
+| F-005 | 미확인 정보 비창작 | validator + response guard |
+
+### 3.2 Classification / Extraction
+| ID | 목표 | 구현 핵심 |
+| --- | --- | --- |
+| F-006 | 7개 action 정확 분류 | enum validator |
+| F-007 | 분과 추정 | 명시 분과 / 의사 / 증상 기반 힌트 |
+| F-008 | 증상 기반 분과 안내 | 의료 진단 금지 + guidance response |
+| F-009 | 의사명→분과 매핑 | 고정 테이블 |
+| F-010 | 날짜/시간/분과/대상 예약 정보 추출 | rule + LLM hybrid |
+| F-011 | 정보 부족 시 clarify | action별 필수 정보 검사 |
+
+### 3.3 Dialogue
+| ID | 목표 | 구현 핵심 |
+| --- | --- | --- |
+| F-012 | clarify 이후 누적 컨텍스트 | session_state 누적 슬롯 |
+| F-013 | 예약 2단계 확인 흐름 | pending_confirmation |
+| F-014 | 여러 기존 예약 모호성 해소 | pending_candidates |
+| F-031 | 가용 슬롯 제안 기반 2단계 흐름(Q4) | slot selection state |
+
+### 3.4 Policy
+| ID | 목표 | 구현 핵심 |
+| --- | --- | --- |
+| F-015 | 1시간당 최대 3명 | hourly capacity |
+| F-016 | 변경/취소 24시간 규칙 | exact boundary handling |
+| F-017 | 초진 40분 / 재진 30분 | duration-aware overlap |
+| F-018 | modify/cancel/check 저장소 진실원천 검증 | storage-backed lookup |
+| F-019 | 당일 신규 예약 보수 처리 | 일반=clarify, 응급=escalate |
+| F-020 | 슬롯 불가 시 대체 시간 안내 | deterministic alternatives |
+
+### 3.5 Runtime / Shared Core
+| ID | 목표 | 구현 핵심 |
+| --- | --- | --- |
+| F-021 | chat.py가 shared core 사용 | `process_message`/`process_ticket` 공유 |
+| F-022 | run.py가 shared core 사용 | batch adapter만 유지 |
+| F-023 | 배치 JSON 키 정합성 | fixed output contract |
+| F-024 | confidence/reasoning 비하드코딩 | rule-based synthesis |
+| F-034 | chat/run 공통 cal.com 로직 공유 | `agent.py` orchestration |
+| F-040 | now 주입 테스트 가능 | deterministic time tests |
+
+### 3.6 Reliability / Evaluation
+| ID | 목표 | 구현 핵심 |
+| --- | --- | --- |
+| F-025 | golden_eval 일반화 평가 | eval CLI + labels |
+| F-026 | Ollama 실패 안전 폴백 | llm_client standard error payload |
+| F-033 | cal.com 실패 안전 폴백 | external error normalization |
+| F-039 | 저장소 실패 안전 폴백 | false success 금지 |
+| F-041 | gold case는 원본 ticket 구조 유지 | evaluator input contract |
+
+### 3.7 Storage
+| ID | 목표 | 구현 핵심 |
+| --- | --- | --- |
+| F-036 | 신규 예약 저장소 반영 | create + persist |
+| F-037 | 변경/취소 저장소 반영 | update/cancel persist |
+| F-038 | chat/run 공통 저장소 계층 | shared storage module |
+
+### 3.8 Integration / Documentation
+| ID | 목표 | 구현 핵심 |
+| --- | --- | --- |
+| F-027 | final_report 필수 항목 포함 | 문서 체크리스트 |
+| F-028 | cal.com 설정 로드 | env config layer |
+| F-029 | 분과↔Event Type 매핑 | fixed mapping |
+| F-030 | available slots 조회 | API wrapper |
+| F-032 | 실제 booking 생성 | booking API wrapper |
+| F-035 | Q4 외부 준비사항 문서화 | setup checklist |
+
+---
+
+## 4. 구현 Phase 순서 (실제 코딩 순서)
+
+코딩은 아래 순서를 따른다. 이 순서를 깨면 회귀 위험이 커진다.
+
+### Phase 0. 문서 동기화 완료
+- `policy_digest.md`, `architecture.md`, `10_plan.md` 일치화
+- 용어 통일: action, safety category, storage truth source, policy order
+
+### Phase 1. 저장소 계층 도입/정리
+- `src/storage.py` 신설 권장
+- load / save / list / find / create / modify / cancel API 정의
+- `agent.py` 내부 파일 읽기 helper를 storage 계층으로 이동
+
+### Phase 2. Safety 완결
+- F-001~F-005
+- mixed request의 safe subrequest 계약 확정
+
+### Phase 3. Classification / Extraction 완결
+- F-006~F-011
+- 모든 누락 정보가 action별로 명시적으로 계산되도록 정리
+
+### Phase 4. Policy 완결
+- F-015~F-020, F-040
+- policy 입출력 스키마 고정
+
+### Phase 5. Dialogue 완결
+- F-012~F-014
+- 세션 상태 누적/확인/후보선택 분기 정리
+
+### Phase 6. Persistence 연결
+- F-018, F-036, F-037, F-038, F-039
+- 예약 성공/변경/취소가 실제 저장으로 이어지도록 연결
+
+### Phase 7. Runtime / Evaluation 정리
+- F-021~F-026, F-041
+- batch 계약, golden eval, confidence/reasoning 점검
+
+### Phase 8. Q4 cal.com 구현
+- F-028~F-035
+- slot lookup / booking / sync / graceful failure
+
+### Phase 9. 제출 문서 마감
+- F-027, F-035
+- final_report 및 데모 증빙 정리
+
+---
+
+## 5. 파일 구조 계획
+
+최종 목표 기준 권장 파일 구조는 다음과 같다.
 
 ```text
-agent.py
-  ├─ classifier.py
-  ├─ policy.py
-  ├─ response_builder.py
-  └─ calcom_client.py
+chat.py
+run.py
 
-classifier.py
-  └─ llm_client.py
-       └─ ollama chat(format='json')
-
-policy.py
-  └─ 순수 결정론 (ollama 없음)
-
-llm_client.py
-  └─ ollama chat(format='json') + 에러 처리
-
-calcom_client.py
-  └─ requests + cal.com API
+src/
+  agent.py
+  classifier.py
+  llm_client.py
+  policy.py
+  response_builder.py
+  calcom_client.py
+  storage.py          # 신규 권장
+  models.py           # 필요 시 결과/상태 dataclass 또는 typed dict
+  utils.py
+  prompts.py
 ```
 
-### 모듈별 책임
+### 5.1 파일별 책임
+
+#### `chat.py`
+- CLI 입출력만 담당
+- 세션 생성 / 세션 유지
+- 비즈니스 로직 없음
+
+#### `run.py`
+- 입력 JSON 로드
+- 각 ticket에 대한 `process_ticket()` 호출
+- 결과 JSON 저장
+- 비즈니스 로직 없음
 
 #### `src/agent.py`
-- 전체 오케스트레이터이자 단일 진실원천.
-- 입력 정규화 → safety → classification/extraction → missing field 확인 → policy → cal.com(Q4) → response build 순서로 처리.
-- `process_ticket(ticket, now=None)` 기본 형태를 유지하고, 멀티턴용 `session_state`를 선택적으로 받도록 확장.
+- 전체 오케스트레이션
+- safety → classify/extract → session merge → storage lookup → policy → persist/cal.com → response
+- runtime fields(`ticket_id`, `classified_intent`, `confidence`, `reasoning`) 최종 보장
 
 #### `src/classifier.py`
-- 메시지를 safety 결과와 구조화된 intent/extraction 결과로 변환.
-- 직접 Ollama를 부르지 않고 `llm_client.py`를 경유.
-- 허용되지 않은 action/department/value를 validator로 걸러 `clarify` 또는 error code로 강등.
+- safety 결과 생성
+- intent/extraction 생성
+- doctor/department/date/time normalization
+- enum 및 분과 validator
 
 #### `src/llm_client.py`
-- `from ollama import chat` 기반 공통 호출 계층.
-- 모든 호출에 `format='json'`을 강제하고 JSON parse/예외/비정상 응답을 표준 오류 구조로 반환.
-- 외부 모델 의존성을 classifier에서 분리해 테스트를 쉽게 만든다.
+- Ollama 호출 공통 계층
+- JSON parse / retry / 표준 에러 페이로드
 
 #### `src/policy.py`
-- 시간, 정원, 슬롯 길이, 기존 예약 존재 여부를 판정하는 순수 결정론 엔진.
-- LLM을 쓰지 않으며 구조화 입력만 사용.
-- 결과는 `allowed`, `reason_code`, `reason`, `needs_alternative`, `alternative_slots` 등을 포함.
+- 결정론 정책 판정 엔진
+- 입력이 동일하면 항상 동일 결과를 반환해야 함
 
-#### `src/response_builder.py`
-- safety/intent/policy/cal.com 결과를 종합해 최종 사용자 응답과 배치 JSON을 조립.
-- `confidence`와 `reasoning`을 실제 파이프라인 결과 기반으로 계산.
-- 미확인 사실이 최종 문장에 들어가지 않도록 마지막 방어선을 담당.
+#### `src/storage.py` (신규 권장)
+- 로컬 JSON 파일 CRUD 공통 계층
+- atomic write / 파일 손상 방어 / 상태 업데이트 처리
 
 #### `src/calcom_client.py`
-- Q4 외부 연동 전용 계층.
-- 설정 로드, event type 매핑, slot 조회, booking 생성, API 오류 정규화를 담당.
-- 설정 누락 시 graceful skip, 실패 시 false success 없이 안전 복구 상태만 반환.
+- env config load
+- event type mapping
+- available slots 호출
+- booking 생성
+- 외부 오류 정규화
+
+#### `src/response_builder.py`
+- 사용자 자연어 응답 문장 조립
+- 예약 요약 문구 생성
+- clarify 질문 / 옵션 질문 / 성공 문구 생성
 
 ---
 
-## 4. 데이터 흐름 (ticket dict → 각 단계 → result dict)
+## 6. 데이터 계약 상세
 
-### 입력 예시
+이 절은 구현 시 함수 간 입출력 형식을 통일하기 위한 것이다.
+
+### 6.1 Ticket 입력 계약
 
 ```python
 ticket = {
@@ -412,189 +312,971 @@ ticket = {
 }
 ```
 
-### Step 0. normalize input (`agent.py`)
-- ticket에서 `message`, `customer_type`, `context`, `timestamp`를 정규화한다.
-- `now`가 없으면 `datetime.now(timezone.utc)`를 사용한다.
-
-```python
-normalized = {
-    "ticket": ticket,
-    "message": ticket["message"],
-    "customer_type": ticket.get("customer_type"),
-    "context": ticket.get("context", {}),
-    "now": now,
-}
-```
-
-### Step 1. safety gate (`classifier.py`)
-- `message`를 safety classifier에 보내 unsafe 여부를 판정한다.
-- 혼합 요청이면 `safe_booking_text`를 추가로 반환할 수 있다.
+### 6.2 `safety_result` 계약
 
 ```python
 safety_result = {
-    "category": "safe",
-    "contains_booking_subrequest": False,
-    "safe_booking_text": None,
-    "reason": "예약 관련 일반 문의"
+    "category": "safe" | "medical_advice" | "off_topic" | "emergency" | "complaint" | "classification_error",
+    "reason": str,
+    "is_medical": bool,
+    "is_off_topic": bool,
+    "is_emergency": bool,
+    "mixed_department_guidance": bool,
+    "department_hint": str | None,
+    "unsupported_department": str | None,
+    "unsupported_doctor": str | None,
+    "contains_booking_subrequest": bool,
+    "safe_booking_text": str | None,
+    "fallback_action": str | None,
+    "fallback_message": str | None,
 }
 ```
 
-### Step 2. classification + extraction (`classifier.py`)
-- 안전한 메시지를 action, department, doctor, datetime, customer_type, target appointment 등으로 구조화한다.
+### 6.3 `intent_result` 계약
 
 ```python
 intent_result = {
-    "classified_intent": "book_appointment",
-    "action": "book_appointment",
-    "department": "이비인후과",
-    "doctor_name": "이춘영 원장",
-    "booking_time": "2026-03-17T05:00:00Z",
-    "customer_type": "재진",
-    "missing_fields": [],
-    "raw_confidence": 0.86
+    "action": str,
+    "department": str | None,
+    "doctor_name": str | None,
+    "date": "YYYY-MM-DD" | None,
+    "time": "HH:MM" | None,
+    "booking_time": str | None,
+    "customer_type": "초진" | "재진" | None,
+    "is_first_visit": bool | None,
+    "missing_info": list[str],
+    "target_appointment_hint": dict | None,
+    "error": bool | None,
+    "fallback_action": str | None,
+    "fallback_message": str | None,
 }
 ```
 
-### Step 3. clarification guard (`agent.py`)
-- 필수 정보가 부족하면 policy 전에 `clarify`로 전환한다.
-- 멀티턴이면 `session_state.pending_slots`에 누락 필드를 저장한다.
-
-```python
-clarify_state = {
-    "action": "clarify",
-    "missing_fields": ["booking_time", "customer_type"],
-    "pending_intent": {"action": "book_appointment"}
-}
-```
-
-### Step 4. policy check (`policy.py`)
-- 구조화된 intent와 기존 예약/전체 예약 데이터를 바탕으로 허용 여부와 대체안을 계산한다.
+### 6.4 `policy_result` 계약
 
 ```python
 policy_result = {
-    "allowed": True,
-    "reason_code": "SUCCESS",
-    "reason": "정책 검사를 통과했습니다.",
-    "needs_alternative": False,
-    "alternative_slots": []
+    "allowed": bool,
+    "reason_code": str,
+    "reason": str,
+    "recommended_action": str | None,
+    "needs_alternative": bool,
+    "alternative_slots": list[str],
+    "slot_duration_minutes": int | None,
+    "same_day": bool | None,
 }
 ```
 
-또는:
+### 6.5 `session_state` 계약
 
 ```python
-policy_result = {
-    "allowed": False,
-    "reason_code": "SLOT_FULL_CAPACITY",
-    "reason": "해당 시간대에는 예약 인원이 가득 찼습니다. 다른 시간대를 선택해 주세요.",
-    "needs_alternative": True,
-    "alternative_slots": [
-        "2026-03-17T06:00:00Z",
-        "2026-03-17T06:30:00Z"
+session_state = {
+    "conversation_history": list[dict],
+    "accumulated_slots": {
+        "date": str | None,
+        "time": str | None,
+        "department": str | None,
+    },
+    "pending_confirmation": {
+        "action": str,
+        "appointment": dict,
+        "slot_options": list[dict] | None,
+    } | None,
+    "pending_action": str | None,
+    "pending_missing_info": list[str],
+    "pending_candidates": list[dict] | None,
+}
+```
+
+### 6.6 `storage_record` 계약
+
+최소 필드:
+
+```python
+appointment = {
+    "id": str,
+    "customer_name": str,
+    "booking_time": str,
+    "department": str,
+    "customer_type": "초진" | "재진",
+}
+```
+
+권장 확장 필드:
+
+```python
+appointment = {
+    "id": str,
+    "customer_name": str,
+    "booking_time": str,
+    "department": str,
+    "customer_type": "초진" | "재진",
+    "status": "active" | "cancelled",
+    "created_at": str,
+    "updated_at": str,
+    "cancelled_at": str | None,
+    "source": "local" | "calcom",
+    "external_booking_id": str | None,
+}
+```
+
+### 6.7 최종 결과 계약
+
+```python
+result = {
+    "ticket_id": str | None,
+    "classified_intent": str,
+    "department": str | None,
+    "action": str,
+    "response": str,
+    "confidence": float,
+    "reasoning": str,
+}
+```
+
+---
+
+## 7. 세부 구현 계획: Safety
+
+### F-001 의료 상담 요청 reject
+**구현 위치**: `src/classifier.py`, `src/agent.py`
+
+#### 요구 동작
+- 진단, 약물, 처방, 치료 방법, 의학적 판단 요청은 무조건 `reject`
+- 정책/예약 단계로 넘어가면 안 됨
+
+#### 구현 방법
+- keyword rule 우선
+- 애매한 케이스는 `_call_safety_llm()`로 보조 판별
+- `agent.py`에서 safety category가 `medical_advice`이면 즉시 응답 반환
+
+#### 예외
+- 증상 기반 분과 문의는 의료 상담이 아니라 예약 안내로 분리
+- “진료 예약”처럼 `진료`라는 단어가 들어가도 예약 맥락이면 차단 금지
+
+### F-002 목적 외 사용 / 인젝션 reject
+**구현 위치**: `src/classifier.py`, `src/agent.py`
+
+#### 요구 동작
+- 날씨, 잡담, 타 서비스 문의, 내부 프롬프트 공개 요구 차단
+
+#### 구현 방법
+- `INJECTION_PATTERNS`, `OFF_TOPIC_PATTERNS` 유지/보강
+- 인젝션과 예약 요청이 혼합된 경우에도 내부 지침은 절대 노출 금지
+
+### F-003 응급 escalate
+**구현 위치**: `src/classifier.py`, `src/agent.py`, `src/response_builder.py`
+
+#### 요구 동작
+- 급성 통증 / 응급 / 즉시 진료 강요는 자동 예약이 아니라 `escalate`
+
+#### 구현 방법
+- regex rule 우선, subtle 표현은 LLM 보조
+- 응답 문구는 “상담원 또는 의료진 확인이 먼저 필요”로 통일
+
+### F-004 의료+예약 혼합 요청 분리
+**구현 위치**: `src/classifier.py`, `src/agent.py`
+
+#### 목표 상태
+혼합 요청은 다음 세 가지 중 하나여야 한다.
+
+1. 의료 부분 거부 + 예약 부분 후속 처리
+2. 의료 부분 거부 + 예약 부분 clarify
+3. 안전 분리 불가 시 전체 reject
+
+#### 추가 구현 항목
+- `safety_result.contains_booking_subrequest`
+- `safety_result.safe_booking_text`
+- 필요 시 mixed-intent 전용 parsing helper
+
+#### 예외 규칙
+- “이 약 먹어도 되나요?”만 있으면 전체 `reject`
+- “이 약 먹어도 되나요? 그리고 내일 예약”은 예약 텍스트만 downstream으로 전달 가능
+- 의료 조언 응답과 예약 응답이 한 문장에서 섞이더라도 의료 판단은 생성 금지
+
+### F-005 미확인 정보 비창작
+**구현 위치**: `src/classifier.py`, `src/agent.py`, `src/response_builder.py`
+
+#### 체크 항목
+- 지원하지 않는 분과
+- 지원하지 않는 의사
+- 확인되지 않은 가용시간
+- 저장소에 없는 기존 예약
+
+#### 구현 방법
+- validator 함수로 normalize 실패 시 `None`
+- 최종 문장 조립 시 `None` 기반으로만 응답 생성
+- 없는 값을 임의 대체하지 않음
+
+---
+
+## 8. 세부 구현 계획: Classification / Extraction
+
+### F-006 7개 action 정확 분류
+**구현 위치**: `src/classifier.py`, `src/llm_client.py`, `src/prompts.py`
+
+#### 구현 원칙
+- rule-based prior + LLM 보조
+- 최종 action은 validator로 7개 enum만 허용
+- enum 밖 값은 `clarify`
+
+### F-007 분과 추정
+**구현 위치**: `src/classifier.py`
+
+#### 추정 우선순위
+1. 명시 분과
+2. 의사명 매핑
+3. 증상 기반 분과 힌트
+4. ticket.context.preferred_department
+5. 그래도 불명확하면 `None`
+
+### F-008 증상 기반 분과 안내
+**구현 위치**: `src/classifier.py`, `src/response_builder.py`
+
+#### 응답 원칙
+- “예약 안내 기준으로는 이비인후과가 적절할 수 있습니다” 수준까지 허용
+- “감기 같습니다”, “약 드세요” 같은 문구 금지
+
+### F-009 의사명→분과 매핑
+**구현 위치**: `src/classifier.py`, `src/policy.py` 또는 `src/utils.py`
+
+#### 고정 매핑
+- 이춘영 원장 → 이비인후과
+- 김만수 원장 → 내과
+- 원징수 원장 → 정형외과
+
+#### 예외
+- 지원하지 않는 의사명은 추정 금지
+
+### F-010 핵심 슬롯 정보 추출
+**구현 위치**: `src/classifier.py`
+
+#### 추출 대상
+- 날짜
+- 시간
+- 분과
+- 의사명
+- customer_type / first_visit
+- 기존 예약 대상 힌트
+
+#### 구현 원칙
+- rule extraction 우선
+- LLM extraction 보조
+- 상대 날짜 표현은 반드시 `now` 기준 해석
+
+#### 예외
+- 날짜만 있고 시간이 없으면 missing info 유지
+- “다음 주 화요일”은 local timezone 기준으로 정확히 계산
+- 12시/정오/자정/반 표현 지원
+
+### F-011 정보 부족 시 clarify
+**구현 위치**: `src/agent.py`, `src/response_builder.py`
+
+#### action별 clarify 조건
+- `book_appointment`: 분과/날짜/시간/고객유형 부족
+- `modify_appointment`: 기존 예약 대상 불명확, 새 시간 누락
+- `cancel_appointment`: 기존 예약 대상 불명확
+- `check_appointment`: 대상 예약 불명확
+
+#### 구현 규칙
+- 누락 필드는 리스트로 계산
+- 질문은 한 번에 너무 길지 않게, 우선순위 높은 항목부터 묻기
+
+---
+
+## 9. 세부 구현 계획: Dialogue / Session
+
+### F-012 clarify 후 정보 누적
+**구현 위치**: `src/agent.py`
+
+#### 누적해야 할 것
+- date
+- time
+- department
+- pending action
+- pending missing info
+
+#### 구현 포인트
+- 새 입력이 일부 슬롯만 포함하더라도 이전 슬롯과 merge
+- 누적 정보가 완성되면 다시 book/modify/cancel/check로 승격
+
+### F-013 예약 2단계 확인 흐름
+**구현 위치**: `src/agent.py`, `src/response_builder.py`
+
+#### chat 모드 목표 흐름
+1. 예약 요청 분석
+2. 정책 통과
+3. “~로 예약할까요?” 질문
+4. “네” → 실제 확정
+5. “아니요” → clarify로 복귀
+
+#### batch 모드 차이
+- 세션이 없으므로 confirm 대기 없이 단일 결과만 반환
+- 문서/테스트에서 이 차이를 명확히 유지
+
+### F-014 여러 기존 예약 모호성 해소
+**구현 위치**: `src/agent.py`, `src/response_builder.py`
+
+#### 목표 흐름
+1. 고객 이름 기반 기존 예약 목록 조회
+2. 분과/날짜/시간 힌트로 후보 좁힘
+3. 여전히 여러 건이면 번호 리스트 질문
+4. 사용자 답변으로 한 건 선택
+5. 이후 정책 적용
+
+#### 예외
+- 번호, 분과명, 날짜, 시간 어느 방식으로 답해도 선택 가능하게 처리
+
+---
+
+## 10. 세부 구현 계획: Policy
+
+### F-015 1시간당 최대 3명
+**구현 위치**: `src/policy.py`
+
+#### 규칙
+- 요청 시작 시각이 속한 local hour window 기준
+- 3명까지 허용, 4번째부터 불가
+
+#### 주의점
+- 단순 “같은 시작시각”이 아니라 “같은 1시간 창” 기준
+- 기존 예약이 14:00, 14:20, 14:40이면 14시 창은 full
+
+### F-016 24시간 변경/취소 규칙
+**구현 위치**: `src/policy.py`
+
+#### 규칙
+- `now <= appointment_time - 24h` 이면 허용
+- 정확히 24시간 전은 허용
+- 24시간보다 늦으면 불가
+
+#### 주의점
+- naive datetime 금지, timezone-aware로 normalize
+
+### F-017 초진 40분 / 재진 30분
+**구현 위치**: `src/policy.py`
+
+#### 규칙
+- 초진: 40분
+- 재진: 30분
+- overlap 계산은 duration-aware
+
+#### 예외
+- customer_type 누락 시 availability 계산 금지 → `clarify`
+
+### F-018 기존 예약 진실원천 검증
+**구현 위치**: `src/storage.py`, `src/agent.py`, `src/policy.py`
+
+#### 규칙
+- modify/cancel/check는 `ticket.context`만으로 처리하지 않는다.
+- 저장소에 실제 예약이 있어야 한다.
+
+#### 구현 항목
+- `find_customer_appointments(customer_name, status='active')`
+- `find_matching_appointments(customer_name, filters)`
+
+### F-019 일반 당일 신규 예약 보수 처리
+**구현 위치**: `src/policy.py`
+
+#### 규칙
+- 일반 당일 신규 예약: 자동 확정 금지
+- 응급/급성 통증은 safety에서 `escalate`
+- 일반 당일 예약은 `clarify` + 다음날 또는 대체시간 안내
+
+### F-020 슬롯 불가 시 대체안 안내
+**구현 위치**: `src/policy.py`, `src/response_builder.py`
+
+#### 구현 원칙
+- 요청 슬롯 이후 인접 슬롯 탐색
+- 대체안 1~3개 정도 제시
+- 단순 “안 됩니다”로 끝내지 않음
+
+---
+
+## 11. 세부 구현 계획: Storage
+
+이 영역은 이후 코딩에서 가장 중요하다. features.json 업데이트의 핵심 반영 대상이다.
+
+### F-036 신규 예약 영속화
+**구현 위치**: `src/storage.py`, `src/agent.py`
+
+#### 목표 동작
+- 예약 확정 후 `data/appointments.json`에 실제 레코드 추가
+- 다음 요청에서 즉시 조회 가능
+
+#### 권장 함수
+```python
+def load_appointments(path: Path | None = None) -> list[dict]: ...
+def save_appointments(appointments: list[dict], path: Path | None = None) -> None: ...
+def create_appointment(record: dict, path: Path | None = None) -> dict: ...
+```
+
+#### 구현 세부
+- id 생성 규칙 필요 (`appt-###` 또는 UUID)
+- `created_at`, `updated_at`, `status='active'` 권장
+- atomic write 권장: temp file 작성 후 replace
+
+### F-037 변경/취소 영속화
+**구현 위치**: `src/storage.py`, `src/agent.py`
+
+#### 목표 동작
+- modify: 기존 예약 레코드 갱신
+- cancel: soft delete(`status='cancelled'`) 권장
+- 이후 조회는 최신 상태 기준
+
+#### 권장 함수
+```python
+def update_appointment(appointment_id: str, changes: dict, path: Path | None = None) -> dict: ...
+def cancel_appointment(appointment_id: str, path: Path | None = None) -> dict: ...
+```
+
+### F-038 chat/run 공통 저장소 계층
+**구현 위치**: `src/storage.py`, `chat.py`, `run.py`, `src/agent.py`
+
+#### 원칙
+- chat/run이 파일을 직접 만지지 않음
+- storage 계층 하나로 read/write 수행
+
+### F-039 저장 실패 안전 복구
+**구현 위치**: `src/storage.py`, `src/agent.py`
+
+#### 실패 케이스
+- 파일 없음
+- JSON 깨짐
+- write permission 오류
+- 동시 쓰기 중 충돌
+
+#### 복구 원칙
+- 예약 성공 메시지 금지
+- `reject` 또는 `clarify` 또는 사람 확인 유도
+- 오류는 reasoning 또는 로그에 반영 가능하되 사용자에게 내부 구현 세부를 과도하게 노출하지 않음
+
+---
+
+## 12. 세부 구현 계획: Runtime / Output
+
+### F-021 chat.py shared core
+**구현 위치**: `chat.py`, `src/agent.py`
+
+#### 역할 분리
+- chat.py: 입출력 루프, exit 처리, session 생성
+- agent.py: 모든 판단
+
+### F-022 run.py shared core
+**구현 위치**: `run.py`, `src/agent.py`
+
+#### 역할 분리
+- run.py: JSON 입력/출력과 `now` 결정만 담당
+
+### F-023 배치 JSON 계약
+필수 키:
+
+- `ticket_id`
+- `classified_intent`
+- `department`
+- `action`
+- `response`
+- `confidence`
+- `reasoning`
+
+누락 금지, 의미 드리프트 금지.
+
+### F-024 confidence / reasoning 동적 산출
+**구현 위치**: `src/agent.py`
+
+#### confidence 산식 설계 원칙
+- safety 단계에서 명확히 판정되면 높게
+- 필수 정보 부족이면 낮춤
+- policy 통과 시 가중치 증가
+- fallback/오류가 있었으면 감점
+
+#### reasoning 구성 원칙
+- safety 근거
+- 분류 근거
+- 추출된 슬롯 정보
+- 정책 판정 근거
+- clarify/escalate/reject 사유
+
+하드코딩 문구 한 줄로 때우지 말고 실제 판단 근거를 조합한다.
+
+### F-040 now 주입 테스트 가능성
+**구현 위치**: `src/agent.py`, `src/classifier.py`, `src/policy.py`, `run.py`
+
+#### 원칙
+- 상대 날짜 파싱, 24시간 계산, same-day 판정, success message 날짜 표현은 모두 `now` 기준이어야 함
+
+---
+
+## 13. 세부 구현 계획: Reliability / Evaluation
+
+### F-025 golden_eval
+**구현 위치**: `golden_eval/eval.py`
+
+#### 목표
+- gold case와 result 비교
+- action accuracy, department accuracy, safety miss 등을 별도 계산
+
+### F-026 Ollama 실패 안전 폴백
+**구현 위치**: `src/llm_client.py`, `src/classifier.py`, `src/agent.py`
+
+#### 실패 유형
+- connection refused
+- timeout
+- invalid response
+- invalid JSON
+
+#### 복구 규칙
+- 위험한 허용 금지
+- 일반적으로 `clarify`
+- 안전성 판정 완전 실패 + 애매한 문장인 경우 `reject` 또는 `clarify`
+
+### F-041 gold case 계약 유지
+**구현 위치**: `golden_eval/gold_cases.json`, `golden_eval/eval.py`
+
+#### 원칙
+- 원본 tickets 구조 유지
+- expected label만 추가
+- note에 사람 검증 필요 명시
+
+---
+
+## 14. 세부 구현 계획: Q4 cal.com
+
+이 절은 선택 과제지만 설계는 미리 확정한다.
+
+### F-028 cal.com 설정 로드
+**구현 위치**: `src/calcom_client.py`
+
+#### 권장 환경변수
+- `CALCOM_API_KEY`
+- `CALCOM_BASE_URL` (없으면 기본값 사용 가능)
+- event type mapping 관련 식별자(필요 시 slug 기반 처리)
+
+#### 권장 함수
+```python
+def load_calcom_config() -> dict: ...
+```
+
+### F-029 분과 ↔ Event Type 매핑
+고정 매핑:
+
+- 이비인후과 → `ent-consultation`
+- 내과 → `internal-medicine`
+- 정형외과 → `orthopedics`
+
+### F-030 available slots 조회
+**구현 위치**: `src/calcom_client.py`, `src/agent.py`
+
+#### 호출 조건
+- action=`book_appointment`
+- 필수 정보 확보
+- policy 통과
+- config enabled
+
+#### 출력 정규화 예시
+```python
+{
+    "enabled": True,
+    "status": "slots_proposed",
+    "event_type": "internal-medicine",
+    "slot_options": [
+        {"start": "2026-03-25T14:00:00+09:00", "end": "2026-03-25T14:30:00+09:00"}
     ]
 }
 ```
 
-### Step 5. Q4 cal.com (`calcom_client.py`, optional)
-- 조건: `action == 'book_appointment'`, policy allowed, cal.com enabled.
-- slot 조회 및 booking 생성은 policy 이후에만 실행한다.
+### F-031 가용 슬롯 2단계 흐름
+**구현 위치**: `src/agent.py`, `src/response_builder.py`
 
+#### 목표 흐름
+1. requested slot 또는 requested date를 바탕으로 slot 조회
+2. 사용자에게 후보 제시
+3. 사용자가 하나 선택
+4. booking 생성
+
+### F-032 실제 booking 생성
+**구현 위치**: `src/calcom_client.py`, `src/agent.py`
+
+#### 권장 함수
 ```python
-calcom_result = {
-    "enabled": True,
-    "status": "slots_proposed",
-    "event_type": "ent-consultation",
-    "slot_options": [
-        {"start": "2026-03-17T05:00:00Z", "end": "2026-03-17T05:30:00Z"}
-    ],
-    "booking": None
-}
+def create_booking(slot_payload: dict, ticket: dict, config: dict) -> dict: ...
 ```
 
-graceful skip 예:
+#### 후속 처리
+- cal.com booking 성공 → 로컬 저장소 동기화
+- 외부 booking id를 `external_booking_id`로 저장 권장
 
-```python
-calcom_result = {
-    "enabled": False,
-    "status": "skipped",
-    "reason": "missing_config"
-}
-```
+### F-033 cal.com 실패 폴백
+**구현 위치**: `src/calcom_client.py`, `src/agent.py`
 
-### Step 6. response build (`response_builder.py`)
-- safety, intent, policy, cal.com 결과를 종합해 최종 result dict를 만든다.
-- `confidence`와 `reasoning`은 실제 근거를 기반으로 생성한다.
+#### 실패 유형
+- config missing
+- available slots API 실패
+- booking API 실패
+- malformed response
 
-```python
-result = {
-    "ticket_id": "T-001",
-    "classified_intent": "book_appointment",
-    "department": "이비인후과",
-    "action": "book_appointment",
-    "response": "김민수님, 내일 오후 2시 이비인후과 예약 요청을 확인했습니다. 예약 가능 여부를 확인해 진행할까요?",
-    "confidence": 0.91,
-    "reasoning": "안전 요청으로 분류되었고, 이비인후과와 예약 시각이 추출되었으며 정책 위반이 확인되지 않았습니다."
-}
-```
+#### 복구 원칙
+- 거짓 성공 금지
+- slot 미확인인데 “가능합니다” 금지
+- booking 미생성인데 “완료되었습니다” 금지
 
-### End-to-End 요약
+### F-034 chat/run 공통 Q4 로직
+**구현 위치**: `src/agent.py`, `chat.py`, `run.py`
 
-```text
-ticket dict
-  ↓
-agent.process_ticket(ticket, now=...)
-  ↓
-normalize input
-  ↓
-safety gate
-  ├─ unsafe -> reject/escalate result dict
-  └─ safe -> continue
-  ↓
-classification + extraction
-  ↓
-missing field check
-  ├─ missing -> clarify result dict + session_state update
-  └─ complete -> continue
-  ↓
-policy check (deterministic)
-  ├─ disallowed -> policy response result dict
-  └─ allowed -> continue
-  ↓
-(optional) cal.com slots/booking
-  ↓
-response_builder
-  ↓
-result dict
-```
+#### 원칙
+- cal.com 직접 호출은 adapter에서 하지 않음
+- agent core만 외부 연동을 orchestration
+
+### F-035 문서화
+문서에 반드시 포함:
+- cal.com 가입
+- API key 준비
+- 3개 Event Type 생성
+- available slots / booking 테스트 방법
+- 캘린더 스크린샷 확보 절차
 
 ---
 
-## 5. 테스트 전략 (5종 테스트 파일 × 어떤 기능을 검증하는가)
+## 15. Action별 상세 플로우
 
-### `tests/test_safety.py`
-- **검증 기능**: F-001, F-002, F-003, F-004, F-005
-- **전략**: unsafe일 때 classifier/policy가 호출되지 않는 제어 흐름을 검증한다. 의료 상담, 잡담, prompt injection, 응급, empty message, 혼합 요청을 회귀 케이스로 유지한다.
+### 15.1 book_appointment
+1. empty message 아니면 safety 실행
+2. unsafe면 reject/escalate 종료
+3. intent/extraction 수행
+4. session_state와 merge
+5. 분과/날짜/시간/고객유형 부족 시 clarify
+6. same-day 일반 예약이면 clarify + 대체안
+7. capacity/overlap 통과 시
+   - chat: confirmation 질문
+   - batch: 단일 턴 success 또는 제안 결과
+8. 확정 시 storage create
+9. Q4 enabled면 cal.com booking 또는 slot proposal
+10. response + runtime fields 생성
 
-### `tests/test_classifier.py`
-- **검증 기능**: F-006, F-007, F-008, F-009, F-010, F-011, F-026
-- **전략**: Ollama 또는 `llm_client`를 mock해 action enum 검증, 분과 추정, 의사명 매핑, datetime 추출, missing field 처리, JSON 파싱 오류 폴백을 확인한다.
+### 15.2 modify_appointment
+1. 기존 예약 후보 찾기
+2. 없으면 clarify
+3. 여러 건이면 clarify
+4. 24시간 rule 통과 여부 확인
+5. 새 시간 미제공이면 clarify
+6. 새 시간 slot availability 검사
+7. storage update
+8. success response
 
-### `tests/test_policy.py`
-- **검증 기능**: F-015, F-016, F-017, F-018, F-019, F-020
-- **전략**: freezegun으로 `now`를 고정하고 24시간 경계값, 3명/4명 용량, 초진/재진 충돌, 기존 예약 유무, same-day 신규 예약, 대체 슬롯 생성을 검증한다.
+### 15.3 cancel_appointment
+1. 기존 예약 후보 찾기
+2. 후보 모호성 해소
+3. 24시간 rule 검사
+4. storage cancel
+5. success response
 
-### `tests/test_batch.py`
-- **검증 기능**: F-021, F-022, F-023, F-024, F-034
-- **전략**: run.py가 각 ticket에 대해 `process_ticket`를 호출하는지, 결과 JSON 키가 모두 존재하는지, action enum이 유효한지, `confidence/reasoning`이 비어 있지 않은지 검증한다.
+### 15.4 check_appointment
+1. 기존 예약 후보 찾기
+2. 여러 건이면 clarify
+3. 한 건이면 summary response
 
-### `tests/test_generalization.py`
-- **검증 기능**: F-004, F-005, F-012, F-013, F-014, F-025, F-033
-- **전략**: 한국어 injection 변형, 의료+예약 혼합, clarify 누적 대화, 복수 예약 후보, 존재하지 않는 의사/분과, cal.com 실패 같은 edge case를 시나리오 단위로 검증한다.
+### 15.5 clarify
+발생 조건:
+- 정보 부족
+- 후보 모호성
+- same-day 일반 예약
+- external/LLM/storage 폴백
+
+### 15.6 escalate
+발생 조건:
+- 응급
+- 급성 통증
+- 반복 민원
+- 사람이 최종 결정해야 하는 예외
+
+### 15.7 reject
+발생 조건:
+- 의료 상담
+- 목적 외 사용
+- 프롬프트 인젝션
+- 미확인 분과/의사에 대해 답변 생성이 필요한 상황
 
 ---
 
-## 마무리 설계 메모
+## 16. 예외 및 경계값 처리 매뉴얼
 
-1. 현재 코드베이스는 골격은 있으나 35개 기능을 충족하려면 safety/intent/extraction/policy/dialogue/runtime/reliability/Q4를 명시적으로 계층화해야 한다.
-2. 핵심 리스크는 LLM 출력 불안정성, 시간 의존 정책, chat/run 로직 분기 오염이다.
-3. 따라서 실제 구현은 반드시 **Phase 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9** 순서로 진행하는 것이 가장 안전하다.
+구현 중 반드시 빠짐없이 처리해야 하는 케이스다.
+
+### 16.1 시간 경계값
+- 정확히 24시간 전 변경/취소 → 허용
+- 24시간에서 1초라도 늦음 → 불가
+- 오늘/내일/모레/글피 → local timezone 기준
+- 다음 주 화요일 → 현재 주가 아닌 다음 주 화요일
+
+### 16.2 정원/겹침
+- 14:00/14:20/14:40으로 3명이 있으면 14시 창 full
+- 초진 40분은 14:00~14:40 점유
+- 재진 30분은 14:00~14:30 점유
+
+### 16.3 고객유형
+- 초진/재진 누락 → clarify
+- “처음 방문” → 초진으로 normalize
+- “재진” 명시 → 재진
+
+### 16.4 기존 예약
+- `context.has_existing_appointment=true`라도 저장소 없으면 있다고 답하면 안 됨
+- 동일 고객 다수 예약 → clarify
+- 번호/분과/날짜/시간으로 후보 선택 가능해야 함
+
+### 16.5 안전 경계
+- 증상 + 예약 문의는 safe 가능
+- 증상 + 진단 요구는 reject
+- 불만 + 예약 변경 문의는 escalate 우선
+- 인젝션 + 예약 요청 혼합 시 내부 지침 노출 금지
+
+### 16.6 외부 실패
+- Ollama down
+- storage write fail
+- cal.com API fail
+
+셋 모두 공통적으로 “완료”라고 말하지 않는 것이 핵심이다.
+
+---
+
+## 17. 테스트 계획 (기능 매핑 포함)
+
+### 17.1 `tests/test_safety.py`
+검증 기능:
+- F-001
+- F-002
+- F-003
+- F-004
+- F-005
+
+필수 케이스:
+- 의료 상담
+- off-topic
+- prompt injection
+- 응급
+- complaint escalation
+- mixed department guidance
+- unknown department
+- unknown doctor
+- safety LLM fallback / connection refused / timeout
+
+### 17.2 `tests/test_classifier.py`
+검증 기능:
+- F-006
+- F-007
+- F-008
+- F-009
+- F-010
+- F-011
+- F-026
+- F-040
+
+필수 케이스:
+- enum validation
+- doctor mapping
+- symptom-based department inference
+- relative date parsing
+- time parsing(반/정오/자정)
+- missing_info 계산
+
+### 17.3 `tests/test_policy.py`
+검증 기능:
+- F-015
+- F-016
+- F-017
+- F-018
+- F-019
+- F-020
+- F-040
+
+필수 케이스:
+- 3명/4명 경계
+- exact 24h boundary
+- less than 24h block
+- first visit overlap
+- revisit overlap
+- same-day general booking
+- same-day emergency booking
+- ambiguous existing appointment
+- alternative slot generation
+
+### 17.4 `tests/test_dialogue.py`
+검증 기능:
+- F-012
+- F-013
+- F-014
+- F-021
+
+필수 케이스:
+- clarify slot accumulation
+- two-step confirmation
+- ambiguous appointment resolution
+- batch without session remains single-turn
+
+### 17.5 `tests/test_batch.py`
+검증 기능:
+- F-022
+- F-023
+- F-024
+- F-034
+
+필수 케이스:
+- batch output keys complete
+- valid action enum only
+- confidence/reasoning populated
+- shared core invocation
+
+### 17.6 `tests/test_storage.py` (신규 권장)
+검증 기능:
+- F-018
+- F-036
+- F-037
+- F-038
+- F-039
+
+필수 케이스:
+- create persists
+- modify persists
+- cancel persists
+- load corrupted json fail-safe
+- write failure no false success
+- chat/run shared path usage
+
+### 17.7 `tests/test_calcom.py` (신규 권장)
+검증 기능:
+- F-028
+- F-029
+- F-030
+- F-031
+- F-032
+- F-033
+- F-034
+
+필수 케이스:
+- config missing graceful skip
+- event type mapping
+- slot lookup normalization
+- booking create normalization
+- API failure fallback
+
+### 17.8 `tests/test_generalization.py`
+검증 기능:
+- F-004
+- F-005
+- F-012
+- F-013
+- F-014
+- F-025
+- F-033
+- F-041
+
+필수 케이스:
+- 한국어 injection 변형
+- 의료+예약 혼합
+- 존재하지 않는 분과/의사
+- 불명확 환자 유형
+- 복수 예약 후보
+- external failure edge case
+
+---
+
+## 18. 구현 체크리스트 (코딩 착수용)
+
+### 18.1 storage 선행 작업
+- [ ] `src/storage.py` 신설
+- [ ] load/save/create/update/cancel/find API 정의
+- [ ] atomic write 도입
+- [ ] `agent.py`의 직접 파일 로드 helper 대체
+
+### 18.2 safety/classifier 정리
+- [ ] mixed request subrequest 계약 추가
+- [ ] intent_result 필드 정규화
+- [ ] missing_info 계산 일원화
+
+### 18.3 policy 정리
+- [ ] policy output schema 고정
+- [ ] same-day / 24h / capacity / overlap 경계값 테스트 보강
+
+### 18.4 runtime 연결
+- [ ] book success 시 storage create
+- [ ] modify success 시 storage update
+- [ ] cancel success 시 storage cancel
+- [ ] check 시 storage lookup only
+
+### 18.5 Q4
+- [ ] calcom_client 구현 또는 보강
+- [ ] config loader
+- [ ] slots 조회
+- [ ] booking 생성
+- [ ] storage sync
+
+### 18.6 문서/평가
+- [ ] final_report 체크리스트 정리
+- [ ] demo evidence 정리
+- [ ] golden eval 최신화
+
+---
+
+## 19. 문서 일관성 규칙
+
+이 문서와 다른 문서가 절대 어긋나면 안 되는 핵심 문장들이다.
+
+1. safety gate가 항상 첫 단계다.
+2. action은 7개 고정값이다.
+3. 일반 당일 신규 예약은 자동 확정하지 않는다.
+4. modify/cancel/check는 저장소가 진실원천이다.
+5. chat.py와 run.py는 같은 `src/agent.py`를 사용한다.
+6. cal.com은 policy 이후에만 호출한다.
+7. 미확인 정보는 생성하지 않는다.
+8. confidence/reasoning은 하드코딩하지 않는다.
+
+문서 업데이트나 코드 변경 시 위 8개가 깨지면 반드시 다시 정렬해야 한다.
+
+---
+
+## 20. 최종 구현 완료 정의 (Definition of Done)
+
+아래를 모두 만족해야 “구현 완료”로 본다.
+
+### 기능 완료
+- F-001 ~ F-041 전체가 코드/문서/테스트 관점에서 설명 가능
+
+### 실행 완료
+- `python chat.py` 동작
+- `python run.py --input tickets.json --output results.json` 동작
+
+### 정책 완료
+- safety-first
+- 24시간 규칙
+- 1시간 3명
+- 초진 40분 / 재진 30분
+- same-day 일반 예약 보수 처리
+
+### 저장소 완료
+- 신규 예약이 저장됨
+- 변경/취소가 저장됨
+- 조회/변경/취소가 저장소 기준으로 동작함
+
+### 품질 완료
+- 테스트 통과
+- golden eval 실행 가능
+- 문서 간 서술 불일치 없음
+
+### Q4 완료(선택)
+- slot 조회 가능
+- booking 생성 가능
+- 캘린더 증빙 가능
+
+---
+
+## 21. 마무리 메모
+
+이후 코딩은 이 문서를 기준으로 진행한다.  
+특히 우선순위는 항상 다음과 같다.
+
+1. **unsafe를 먼저 막는다**
+2. **정책을 코드로 고정한다**
+3. **저장소를 진실원천으로 만든다**
+4. **chat/run을 같은 코어로 묶는다**
+5. **Q4는 그 위에 얹는다**
+
+즉, 구현의 핵심은 “대답 잘하는 챗봇”이 아니라 **안전하고 일관되며 실제 예약 상태를 반영하는 예약 오케스트레이터**를 만드는 것이다.
