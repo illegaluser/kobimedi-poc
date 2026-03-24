@@ -144,28 +144,28 @@
     "category": "runtime",
     "description": "chat.py가 src/agent.py 공통 로직을 호출하고 멀티턴 대화를 지원한다",
     "acceptance": "python chat.py -> 대화 가능, clarify/confirm 후속 입력을 동일 세션 상태로 처리",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-022",
     "category": "runtime",
     "description": "run.py가 src/agent.py 공통 로직을 호출해 배치 처리한다",
     "acceptance": "python run.py --input tickets.json --output results.json",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-023",
     "category": "runtime",
     "description": "배치 JSON이 과제 예시 키와 의미 일관성을 충족한다",
     "acceptance": "ticket_id/classified_intent/department/action/response/confidence/reasoning이 실제 판단 결과와 일치",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-024",
     "category": "runtime",
     "description": "confidence와 reasoning을 하드코딩하지 않고 실제 파이프라인 근거로 생성한다",
     "acceptance": "분류/정책/안전 판단 근거가 결과 reasoning에 반영되고 confidence는 규칙 있게 산출",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-025",

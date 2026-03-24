@@ -6,16 +6,23 @@
 - 구현: Safety Phase(F-001~F-005) 완료
 - 구현: Classification/Extraction Phase(F-006~F-011) 완료
 - 구현: Policy Phase(F-015~F-020) 완료
-- 구현: Dialogue Phase 일부(F-012~F-014) 완료
+- 구현: Dialogue Phase(F-012~F-014) 완료
+- 구현: Runtime Phase(F-021~F-024) 완료
+  - chat.py: create_session + process_message 호출, 멀티턴 세션 공유
+  - run.py: argparse --input/--output, process_ticket 호출, 배치 JSON 출력
+  - process_ticket: ticket_id/classified_intent/department/action/response/confidence/reasoning 키 보장
+  - confidence/reasoning: 파이프라인 근거 기반 동적 산출 (하드코딩 아님)
 - 안정성: Ollama JSON 파싱 실패/호출 실패 폴백(F-026) 반영
-- 검증: dialogue 테스트 추가 및 `pytest tests/ -v` 41건 통과
-- 추적: `.ai/harness/features.json`에서 검증 완료 기능 pass=true 반영
+- 검증: `pytest tests/ -v` 46건 전체 통과
+- 추적: `.ai/harness/features.json`에서 F-021~F-024 passes=true 반영
 
 ## Next step
-- runtime 단계(F-021~F-024) 구현 및 검증
+- reliability + evaluation 단계(F-025, F-026 기확인) 검증
+- Q4 cal.com 연동(F-028~F-035) 구현
+- 문서화(F-027, F-035) 완성
 
 ## Known issues
-- `tests/test_batch.py`는 아직 실질 테스트가 비어 있어 runtime 단계(F-021~F-024) 검증이 남아 있음
+- 없음 (현재 모든 테스트 통과)
 
 ## Submission readiness
 - policy_digest.md: ready
