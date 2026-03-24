@@ -25,12 +25,20 @@ def _parse_now(timestamp: str | None) -> datetime:
     return parsed
 
 
-def run_batch(input_path: str, output_path: str) -> list[dict]:
+def _resolve_ticket_now(ticket: dict, now: datetime | str | None = None) -> datetime:
+    if isinstance(now, datetime):
+        return now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+    if isinstance(now, str):
+        return _parse_now(now)
+    return _parse_now(ticket.get("timestamp"))
+
+
+def run_batch(input_path: str, output_path: str, now: datetime | str | None = None) -> list[dict]:
     tickets = json.loads(Path(input_path).read_text(encoding="utf-8"))
     results: list[dict] = []
 
     for ticket in tickets:
-        result = process_ticket(ticket, now=_parse_now(ticket.get("timestamp")))
+        result = process_ticket(ticket, now=_resolve_ticket_now(ticket, now=now))
         results.append(
             {
                 "ticket_id": result.get("ticket_id") or ticket.get("ticket_id"),

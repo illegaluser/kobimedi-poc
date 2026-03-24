@@ -201,3 +201,36 @@ def test_F022_run_batch_reads_and_writes_json_via_agent(mock_process_ticket, tmp
     first_call_now = mock_process_ticket.call_args_list[0].kwargs["now"]
     assert first_call_ticket["ticket_id"] == "T-001"
     assert isinstance(first_call_now, datetime)
+
+
+@patch("run.process_ticket")
+def test_run_batch_accepts_explicit_now_override(mock_process_ticket, tmp_path):
+    input_path = tmp_path / "tickets.json"
+    output_path = tmp_path / "results.json"
+    input_path.write_text(
+        json.dumps(
+            [
+                {
+                    "ticket_id": "T-100",
+                    "message": "내일 예약",
+                    "timestamp": "2026-03-24T10:00:00+09:00",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    mock_process_ticket.return_value = {
+        "ticket_id": "T-100",
+        "classified_intent": "clarify",
+        "department": None,
+        "action": "clarify",
+        "response": "원하시는 진료과를 알려주세요.",
+        "confidence": 0.66,
+        "reasoning": "날짜 외 필수 정보가 부족합니다.",
+    }
+
+    explicit_now = datetime(2026, 3, 24, 1, 0, tzinfo=timezone.utc)
+    run.run_batch(str(input_path), str(output_path), now=explicit_now)
+
+    assert mock_process_ticket.call_args.kwargs["now"] == explicit_now
