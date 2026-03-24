@@ -1,8 +1,8 @@
 # Progress
 
 ## Current status
-- 문서: policy_digest, architecture 골격, final_report 골격
-- 설계: 10_plan.md 완성
+- 문서: policy_digest done, architecture done(골격), final_report 골격
+- 설계: 10_plan.md 완성, 20_impl.md 작성됨
 - 구현: Safety Phase(F-001~F-005) 완료
 - 구현: Classification/Extraction Phase(F-006~F-011) 완료
 - 구현: Policy Phase(F-015~F-020) 완료
@@ -32,8 +32,7 @@
 - 추적: `.ai/harness/features.json`에서 F-025/F-026 passes=true 반영
 
 ## Next step
-- Q4 cal.com 연동(F-028~F-035) 구현
-- 문서화(F-027, F-035) 완성
+- Phase 1 저장소 계층 도입 (F-036~F-039)
 
 ## Evaluation notes
 - 현재 gold label은 AI 보조 초안이므로 제출 전 반드시 사람이 최종 검수해야 함
@@ -45,7 +44,7 @@
 
 ## Submission readiness
 - policy_digest.md: ready
-- architecture.md: not yet
+- architecture.md: ready (골격)
 - q1_metric_rubric.md: not yet
 - q3_safety.md: not yet
 - demo_evidence.md: not yet
