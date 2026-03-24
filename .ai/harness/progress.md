@@ -1,10 +1,11 @@
 # Progress
 
 ## Current status
-- 문서 초안: policy_digest, architecture 골격, final_report 골격
+- 문서: policy_digest, architecture 골격, final_report 골격
+- 설계: 10_plan.md 완성
 
 ## Next step
-- Section 6: Codex로 상세 설계 → Section 7: Phase 2 Safety 구현
+- Section 7 Phase 2: Safety (F-001~F-005) 구현
 
 ## Known issues
 - (없음)
