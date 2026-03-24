@@ -1,85 +1,59 @@
+from __future__ import annotations
+
+import argparse
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+from pathlib import Path
+
 from src.agent import process_ticket
 
-def main():
-    """
-    Runs the agent in batch mode on a set of tickets.
-    """
-    # Load data
-    try:
-        with open("data/ticket.json", 'r', encoding='utf-8') as f:
-            tickets = json.load(f)
-    except FileNotFoundError:
-        print("Error: data/ticket.json not found.")
-        return
 
-    try:
-        with open("data/appointments.json", 'r', encoding='utf-8') as f:
-            all_appointments = json.load(f)
-    except FileNotFoundError:
-        all_appointments = []
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run Kobimedi batch ticket processing")
+    parser.add_argument("--input", required=True, help="Path to input tickets JSON")
+    parser.add_argument("--output", required=True, help="Path to output results JSON")
+    return parser.parse_args(argv)
 
-    results = []
-    print(f"Processing {len(tickets)} tickets...")
+
+def _parse_now(timestamp: str | None) -> datetime:
+    if not timestamp:
+        return datetime.now(timezone.utc)
+
+    parsed = datetime.fromisoformat(timestamp)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def run_batch(input_path: str, output_path: str) -> list[dict]:
+    tickets = json.loads(Path(input_path).read_text(encoding="utf-8"))
+    results: list[dict] = []
 
     for ticket in tickets:
-        customer_name = ticket.get("customer_name")
-        
-        # Find the user's existing appointment if the context says so
-        existing_appointment = None
-        if ticket.get("context", {}).get("has_existing_appointment"):
-            existing_appointment = next(
-                (appt for appt in all_appointments if appt.get("customer_name") == customer_name),
-                None
-            )
-
-        # In a real scenario, the agent would parse the booking time from the message.
-        # For this PoC, we'll use a placeholder if it's a booking/modification intent.
-        # We'll use the ticket timestamp as a reference for 'now'.
-        raw_ts = ticket["timestamp"]
-        now = datetime.fromisoformat(raw_ts)
-        if now.tzinfo is None:
-            now = now.replace(tzinfo=timezone.utc)
-        
-        # We need to simulate the booking time the user might want.
-        # This is not in the ticket data, so we'll create a dummy time for policy checks.
-        # 현재 기준 최소 48시간 이후로 설정하여 정책 체크가 의미 있게 동작하도록
-        fallback_booking = now + timedelta(days=2)
-        dummy_booking_time = fallback_booking.strftime("%Y-%m-%dT%H:%M:%SZ")
-        ticket_for_agent = {
-            "message": ticket["message"],
-            "customer_type": ticket["customer_type"],
-            "booking_time": dummy_booking_time, # For policy checks
-        }
-
-        # Process the ticket
-        result = process_ticket(
-            ticket=ticket_for_agent,
-            all_appointments=all_appointments,
-            existing_appointment=existing_appointment,
-            now=now
+        result = process_ticket(ticket, now=_parse_now(ticket.get("timestamp")))
+        results.append(
+            {
+                "ticket_id": result.get("ticket_id") or ticket.get("ticket_id"),
+                "classified_intent": result.get("classified_intent"),
+                "department": result.get("department"),
+                "action": result.get("action"),
+                "response": result.get("response"),
+                "confidence": result.get("confidence"),
+                "reasoning": result.get("reasoning"),
+            }
         )
-        
-        # Format the output to match F-015
-        formatted_result = {
-            "ticket_id": ticket["ticket_id"],
-            "classified_intent": result.get("action"), # Renamed for clarity in output
-            "department": result.get("department"),
-            "action": result.get("action"),
-            "response": result.get("response"),
-            # 'confidence' and 'reasoning' are not produced by the current agent.
-            # Adding them as placeholders.
-            "confidence": 0.95, 
-            "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
-        }
-        results.append(formatted_result)
 
-    # Save results
-    with open("results.json", 'w', encoding='utf-8') as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+    Path(output_path).write_text(
+        json.dumps(results, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return results
 
-    print(f"Processing complete. Results saved to results.json")
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(argv)
+    run_batch(args.input, args.output)
+
 
 if __name__ == "__main__":
     main()
