@@ -279,6 +279,7 @@
       "policy_ref": "policy_digest §5.6, §6.4, §7.4",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "impl_note": "storage.py find_bookings()에 patient_contact 파라미터 추가 필요"
     },
     {
@@ -289,6 +290,7 @@
       "policy_ref": "policy_digest §7.3",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "impl_note": "storage.resolve_customer_type_from_history()를 patient_contact 우선으로 확장"
     },
     {
@@ -298,7 +300,8 @@
       "description": "동일 이름으로 복수 환자 존재 시, 생년월일로 좁힌다. 여전히 불확실하면 escalate.",
       "policy_ref": "policy_digest §7.3",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-037",
@@ -307,7 +310,8 @@
       "description": "ticket_id는 요청-응답 흐름 추적용. 환자 identity 자체가 아님. tickets.json 스키마 변경 금지.",
       "policy_ref": "policy_digest §0.2, §7.4",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-038",
@@ -317,6 +321,7 @@
       "policy_ref": "policy_digest §7.4",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "impl_note": "create_booking() 호출 시 patient_contact 포함 필수"
     },
     {
@@ -326,7 +331,8 @@
       "description": "수집된 is_proxy_booking, patient_name, patient_contact는 tickets.json에 쓰지 않고 session/dialogue state에서 관리. 최종 예약 시 bookings.json에 반영.",
       "policy_ref": "policy_digest §0.2, §5.6",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-041",

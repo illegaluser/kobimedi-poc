@@ -1,5 +1,26 @@
 # Progress
 
+## Storage implementation completed (2026-03-25)
+- `src/storage.py` 구현 완료
+  - `data/bookings.json`을 진실원천으로 유지하는 영속 저장소 계층 정비
+  - `find_bookings(..., patient_contact=...)` 추가로 전화번호 우선 조회 지원 (F-034)
+  - `resolve_customer_type_from_history(..., patient_contact=...)` 추가로 전화번호 기반 초진/재진 판정 지원 (F-035)
+  - `create_booking()`에서 `patient_name`, `patient_contact`, `is_proxy_booking`, `booking_time`, `department`, `customer_type`, `status`, `id` 필수 보장 (F-038)
+  - 임시 파일 기록 후 rename하는 원자적 쓰기 및 `StorageDecodeError` / `StorageWriteError` / `StorageValidationError` 명시적 예외 추가 (F-039)
+  - `cancel_booking()` 추가로 취소 상태 영속 반영 가능
+
+- `tests/test_storage.py` 보강 완료
+  - 생성 시 필수 필드 저장 검증
+  - 전화번호 기반 조회 검증
+  - 전화번호 우선 초진/재진 판정 검증
+  - 동명이인 + 생년월일 clarify 경로 검증
+  - 취소 반영 검증
+  - 파일 손상(JSON decode error) 및 쓰기 실패 시 폴백 검증
+
+- 검증 완료
+  - `python -m pytest` → **72 passed**
+  - features.json에서 `F-034 ~ F-039` `passes: true` 반영 완료
+
 ## Current Status
 
 ### Documentation update completed (2026-03-25)
@@ -93,8 +114,8 @@
 ### Must Be Implemented / Reopened
 
 #### Phase 0 (신규 — 최우선)
-- `storage.find_bookings()`: patient_contact 파라미터 추가
-- `storage.resolve_customer_type_from_history()`: patient_contact 우선 조회 확장
+- ✅ `storage.find_bookings()`: patient_contact 파라미터 추가 완료
+- ✅ `storage.resolve_customer_type_from_history()`: patient_contact 우선 조회 확장 완료
 - dialogue state: is_proxy_booking, patient_name, patient_contact 슬롯 추가
 - chat 모드: 예약 의도 확정 후 본인/대리인 확인 질문 생성
 - extraction: 전화번호 패턴 추출, 대리 예약 감지 패턴 강화
@@ -140,8 +161,6 @@
 
 ## Known Issues (Current Codebase)
 
-- `storage.find_bookings()`: patient_contact 필터 미지원 → 전화번호 우선 식별 불가
-- `storage.resolve_customer_type_from_history()`: name+birth_date 기반만 지원, patient_contact 우선 조회 없음
 - dialogue state: is_proxy_booking 슬롯 없음 → 본인/대리인 구분 불가
 - chat 모드: 본인/대리인 확인 질문 생성 로직 없음
 - clarify 멀티턴: 정책상 요구하는 4단계 누적 상태머신 구현 부족
@@ -158,14 +177,16 @@
 | `.ai/harness/features.json` | ✅ 신규 작성 완료 |
 | `.ai/handoff/10_plan.md` | ✅ 신규 작성 완료 |
 | `.ai/harness/progress.md` | ✅ 업데이트 완료 |
+| `src/storage.py` | ✅ Phase 0a 구현 완료 |
+| `tests/test_storage.py` | ✅ 저장소 회귀 테스트 보강 완료 |
 | `docs/q1_metric_rubric.md` | ⬜ 미작성 |
 | `docs/q3_safety.md` | ⬜ 미작성 |
 | `docs/final_report.md` | ⬜ 미업데이트 |
-| 코드 구현 (Phase 0~5) | ⬜ 미시작 |
+| 코드 구현 (Phase 0~5) | ◐ Phase 0a 완료, 이후 단계 진행 필요 |
 
 ## Practical Interpretation
 
 현재 프로젝트 상태:
 
-> **정책/기능/계획 문서가 새 기준으로 정렬 완료.  
-> Phase 0 (storage.py 전화번호 필터 + dialogue state 본인/대리인 슬롯) 부터 구현 착수 필요.**
+> **정책/기능/계획 문서 정렬 및 Phase 0a 저장소 구현이 완료되었습니다.  
+> 다음 작업은 dialogue state / extraction 중심의 Phase 0b~1 구현입니다.**
