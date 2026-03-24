@@ -6,12 +6,13 @@
 - 구현: Safety Phase(F-001~F-005) 완료
 - 구현: Classification/Extraction Phase(F-006~F-011) 완료
 - 구현: Policy Phase(F-015~F-020) 완료
+- 구현: Dialogue Phase 일부(F-012~F-014) 완료
 - 안정성: Ollama JSON 파싱 실패/호출 실패 폴백(F-026) 반영
-- 검증: policy 경계값 테스트 추가 및 `pytest tests/ -v` 재검증 예정
+- 검증: dialogue 테스트 추가 및 `pytest tests/ -v` 41건 통과
 - 추적: `.ai/harness/features.json`에서 검증 완료 기능 pass=true 반영
 
 ## Next step
-- Section 7 이후 runtime/dialogue 단계(F-012~F-014, F-021~F-024) 구현 및 검증
+- runtime 단계(F-021~F-024) 구현 및 검증
 
 ## Known issues
 - `tests/test_batch.py`는 아직 실질 테스트가 비어 있어 runtime 단계(F-021~F-024) 검증이 남아 있음

@@ -1,19 +1,185 @@
 
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from .policy import DOCTOR_DEPARTMENT_MAP
+
+
+DEPARTMENT_DOCTOR_MAP = {department: doctor for doctor, department in DOCTOR_DEPARTMENT_MAP.items()}
+
+
 def build_response(action: str, message: str, **kwargs) -> dict:
-    """
-    Constructs the final response dictionary.
-
-    Args:
-        action: The classified action (e.g., "reject", "escalate").
-        message: The response message for the user.
-        **kwargs: Any other key-value pairs to include in the response.
-
-    Returns:
-        A dictionary structured for the final output.
-    """
     response = {
         "action": action,
         "response": message,
     }
     response.update(kwargs)
     return response
+
+
+def _ensure_datetime(value: str | datetime | None, now: datetime | None = None) -> datetime | None:
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        raw_value = str(value).strip()
+        if not raw_value:
+            return None
+        if raw_value.endswith("Z"):
+            raw_value = f"{raw_value[:-1]}+00:00"
+        try:
+            dt = datetime.fromisoformat(raw_value)
+        except ValueError:
+            return None
+
+    reference_tz = now.tzinfo if now and now.tzinfo else timezone.utc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=reference_tz)
+    return dt
+
+
+def _format_date_phrase(dt: datetime | None, now: datetime | None = None) -> str:
+    if dt is None:
+        return ""
+
+    reference = now if now else datetime.now(dt.tzinfo or timezone.utc)
+    if reference.tzinfo and dt.tzinfo:
+        localized = dt.astimezone(reference.tzinfo)
+    else:
+        localized = dt
+
+    prefix = f"{localized.month}/{localized.day}"
+    delta_days = (localized.date() - reference.date()).days
+    if delta_days == 0:
+        return f"오늘({prefix})"
+    if delta_days == 1:
+        return f"내일({prefix})"
+    if delta_days == 2:
+        return f"모레({prefix})"
+    return prefix
+
+
+def _format_time_phrase(dt: datetime | None) -> str:
+    if dt is None:
+        return ""
+    hour = dt.hour
+    minute = dt.minute
+
+    if hour == 0:
+        meridiem = "오전"
+        display_hour = 12
+    elif hour < 12:
+        meridiem = "오전"
+        display_hour = hour
+    elif hour == 12:
+        meridiem = "오후"
+        display_hour = 12
+    else:
+        meridiem = "오후"
+        display_hour = hour - 12
+
+    if minute == 0:
+        return f"{meridiem} {display_hour}시"
+    return f"{meridiem} {display_hour}시 {minute}분"
+
+
+def format_appointment_summary(appointment: dict, now: datetime | None = None) -> str:
+    department = appointment.get("department")
+    doctor_name = appointment.get("doctor_name") or DEPARTMENT_DOCTOR_MAP.get(department)
+    booking_time = appointment.get("booking_time")
+
+    if booking_time is None and appointment.get("date") and appointment.get("time"):
+        booking_time = f"{appointment['date']}T{appointment['time']}:00"
+
+    dt = _ensure_datetime(booking_time, now)
+    date_text = _format_date_phrase(dt, now) if dt else appointment.get("date") or "날짜 미정"
+    time_text = _format_time_phrase(dt) if dt else appointment.get("time") or "시간 미정"
+
+    pieces = [date_text, time_text]
+    if department:
+        pieces.append(department)
+    if doctor_name:
+        pieces.append(f"{doctor_name} 진료")
+    return " ".join(piece for piece in pieces if piece)
+
+
+def build_missing_info_question(
+    missing_fields: list[str],
+    *,
+    department: str | None = None,
+    action_context: str | None = None,
+) -> str:
+    missing_fields = missing_fields or []
+    primary = missing_fields[0] if missing_fields else None
+
+    if primary == "department":
+        return "어느 분과로 예약할까요?"
+    if primary == "date":
+        return f"{department}로 예약을 도와드릴게요. 원하시는 날짜를 알려주세요." if department else "원하시는 날짜를 알려주세요."
+    if primary == "time":
+        return f"{department}로 예약을 도와드릴게요. 몇 시를 원하시나요?" if department else "원하시는 시간을 알려주세요."
+    if primary == "appointment_target":
+        if action_context == "cancel_appointment":
+            return "어떤 예약을 취소할지 날짜, 시간 또는 분과를 알려주세요."
+        if action_context == "modify_appointment":
+            return "어떤 예약을 변경할지 날짜, 시간 또는 분과를 알려주세요."
+        if action_context == "check_appointment":
+            return "어떤 예약을 확인할지 날짜, 시간 또는 분과를 알려주세요."
+        return "대상 예약을 확인할 수 있도록 날짜, 시간 또는 분과를 알려주세요."
+
+    if action_context == "book_appointment":
+        return "예약을 도와드리려면 원하시는 날짜, 시간, 진료과를 알려주세요."
+    return "추가로 확인이 필요한 정보가 있습니다."
+
+
+def build_confirmation_question(appointment: dict, now: datetime | None = None) -> str:
+    summary = format_appointment_summary(appointment, now)
+    return f"{summary}로 예약할까요?"
+
+
+def build_appointment_options_question(
+    action_context: str,
+    candidate_appointments: list[dict],
+    now: datetime | None = None,
+) -> str:
+    action_text_map = {
+        "cancel_appointment": "취소",
+        "modify_appointment": "변경",
+        "check_appointment": "확인",
+    }
+    action_text = action_text_map.get(action_context, "진행")
+    options = [
+        f"{index}) {format_appointment_summary(appointment, now)}"
+        for index, appointment in enumerate(candidate_appointments, start=1)
+    ]
+    option_text = ", ".join(options)
+    return f"어떤 예약을 {action_text}할까요? {option_text}"
+
+
+def build_success_message(
+    action: str,
+    *,
+    department: str | None = None,
+    appointment: dict | None = None,
+    now: datetime | None = None,
+) -> str:
+    if action == "book_appointment":
+        summary = format_appointment_summary(appointment or {"department": department}, now)
+        return f"{summary} 예약이 완료되었습니다."
+
+    if action == "cancel_appointment":
+        summary = format_appointment_summary(appointment or {"department": department}, now)
+        return f"{summary} 예약 취소가 완료되었습니다."
+
+    if action == "modify_appointment":
+        summary = format_appointment_summary(appointment or {"department": department}, now)
+        return f"{summary} 기준으로 예약 변경이 완료되었습니다."
+
+    if action == "check_appointment":
+        summary = format_appointment_summary(appointment or {"department": department}, now)
+        return f"확인된 예약은 {summary}입니다."
+
+    return "요청이 처리되었습니다."
