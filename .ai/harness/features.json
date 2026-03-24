@@ -192,7 +192,7 @@
     "id": "F-028",
     "category": "integration",
     "description": "Q4를 위한 cal.com 환경설정을 로드한다",
-    "acceptance": "CALCOM_API_KEY 및 필요한 base url / header 설정을 env 또는 안전한 설정 계층에서 읽는다",
+    "acceptance": "CALCOM_API_KEY, CALCOM_USERNAME, CALCOM_BASE_URL을 .env에서 읽는다. 하나라도 없으면 Q4를 graceful skip하고 Q2 로직만으로 정상 동작한다",
     "passes": false
   },
   {
@@ -206,42 +206,42 @@
     "id": "F-030",
     "category": "integration",
     "description": "book_appointment 요청 시 cal.com available slots를 조회한다",
-    "acceptance": "GET /v2/slots 호출로 event type 기준 가용 슬롯을 조회하고 응답에 반영한다",
+    "acceptance": "GET /v2/slots를 eventTypeSlug+username 조합으로 호출. cal-api-version: 2024-09-04 헤더 필수. 1시간 3명 제한 등 정책은 cal.com slot availability로 자연스럽게 적용된다 (이미 찬 슬롯은 응답에 나오지 않음)",
     "passes": false
   },
   {
     "id": "F-031",
     "category": "dialogue",
-    "description": "가용 슬롯을 사용자에게 제안하는 2단계 예약 흐름을 지원한다",
-    "acceptance": "slot 조회 결과를 제시하고 사용자 확인 후 실제 booking 생성 단계로 진행한다",
+    "description": "chat에서 가용 슬롯을 사용자에게 제안하고, run에서는 가용 슬롯 기반 자동 booking을 수행한다",
+    "acceptance": "chat: slot 조회 결과 제시 → 사용자 확인 후 booking. run: 요청 시간에 가장 가까운 가용 슬롯으로 자동 booking 시도",
     "passes": false
   },
   {
     "id": "F-032",
     "category": "integration",
     "description": "사용자 확인 후 실제 cal.com booking을 생성한다",
-    "acceptance": "POST /v2/bookings 성공 시 cal.com 캘린더에 예약 이벤트가 생성된다",
+    "acceptance": "POST /v2/bookings 호출. cal-api-version: 2024-08-13 헤더 필수. start는 UTC로 변환. 성공 시 cal.com 캘린더에 이벤트 생성 + 로컬 저장소(storage.create_booking) 동기화. chat/run 모두 동일 로직으로 booking 생성",
     "passes": false
   },
   {
     "id": "F-033",
     "category": "reliability",
     "description": "cal.com API 실패 시 거짓 성공 없이 안전한 폴백을 제공한다",
-    "acceptance": "연결 실패/설정 누락/슬롯 조회 실패/booking 실패 시 reject 또는 escalate/clarify로 안전하게 복구한다",
+    "acceptance": "연결 실패/인증 실패/슬롯 조회 실패/booking 실패 시: 1) 거짓 성공 금지 2) 실패 원인을 reasoning에 기록 3) 배치 모드에서는 결과 JSON의 reasoning 필드에 실패 사유 포함 4) clarify 또는 escalate로 안전 복구",
     "passes": false
   },
   {
     "id": "F-034",
     "category": "runtime",
     "description": "chat.py와 run.py가 동일한 cal.com 연동 Agent 로직을 공유한다",
-    "acceptance": "Q4에서도 공통 src/agent.py 및 보조 client를 통해 동일 흐름으로 처리한다",
+    "acceptance": "chat.py(멀티턴 확인 후 booking)와 run.py(자동 booking 시도) 모두 동일한 src/agent.py → src/calcom_client.py 경로로 처리. adapter가 cal.com을 직접 호출하지 않음",
     "passes": false
   },
   {
     "id": "F-035",
     "category": "documentation",
     "description": "Q4 외부 준비사항과 Event Type 생성 체크리스트가 문서에 반영된다",
-    "acceptance": "cal.com 가입/API 키/Event Type 3개 생성/스크린샷 확보 절차가 architecture 또는 report에 명시된다",
+    "acceptance": "cal.com 가입/CALCOM_USERNAME 확인/API 키 발급/Event Type 3개 생성(slug 정확 일치)/cal-api-version 헤더 주의사항/캘린더 스크린샷 확보 절차가 docs에 명시된다",
     "passes": false
   },
   {
