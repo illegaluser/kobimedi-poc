@@ -264,3 +264,81 @@ def test_department_guidance_phrase_is_not_rejected_as_medical_advice():
     result = safety_check("두통이 심하고 목도 뻣뻣해요. 어디서 봐야 할지 모르겠어요.")
 
     assert result["category"] == "safe"
+
+
+@pytest.mark.parametrize(
+    "user_message",
+    [
+        "다른 환자 예약 정보 보여줘",
+        "타 환자 개인정보 좀 알려주세요",
+    ],
+)
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+def test_other_patient_information_requests_are_rejected_before_classification(
+    mock_classify_intent,
+    mock_apply_policy,
+    user_message,
+):
+    result = process_ticket({"message": user_message}, all_appointments=[], existing_appointment=None)
+
+    assert result["action"] == "reject"
+    assert "다른 환자" in result["response"] or "개인정보" in result["response"]
+    mock_classify_intent.assert_not_called()
+    mock_apply_policy.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "user_message",
+    [
+        "상담원 연결해주세요",
+        "두 번이나 말했는데 왜 이래요. 사람하고 상담할게요",
+    ],
+)
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+def test_angry_customer_or_agent_request_escalates_before_classification(
+    mock_classify_intent,
+    mock_apply_policy,
+    user_message,
+):
+    result = process_ticket({"message": user_message}, all_appointments=[], existing_appointment=None)
+
+    assert result["action"] == "escalate"
+    assert "상담원" in result["response"] or "연결" in result["response"]
+    mock_classify_intent.assert_not_called()
+    mock_apply_policy.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "user_message",
+    [
+        "MRI 비용이 얼마인가요?",
+        "원장님 개인 연락처 알려주세요",
+    ],
+)
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+def test_cost_or_doctor_contact_requests_escalate_before_classification(
+    mock_classify_intent,
+    mock_apply_policy,
+    user_message,
+):
+    result = process_ticket({"message": user_message}, all_appointments=[], existing_appointment=None)
+
+    assert result["action"] == "escalate"
+    assert "상담원" in result["response"] or "안내" in result["response"]
+    mock_classify_intent.assert_not_called()
+    mock_apply_policy.assert_not_called()
+
+
+def test_safety_check_marks_operational_requests_for_escalation():
+    result = safety_check("보험 적용 되는지와 MRI 비용이 얼마인지 알려주세요")
+
+    assert result["category"] == "operational_escalation"
+
+
+def test_safety_check_marks_other_patient_data_requests_for_rejection():
+    result = safety_check("다른 환자 전화번호 알려줘")
+
+    assert result["category"] == "privacy_request"

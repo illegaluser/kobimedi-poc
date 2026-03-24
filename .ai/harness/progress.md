@@ -1,5 +1,30 @@
 # Progress
 
+## Safety gate implementation completed (2026-03-25)
+- `src/classifier.py` 안전 게이트 보강 완료
+  - safety gate가 classification/policy 이전에 항상 선행되도록 파이프라인 계약 유지 (F-001)
+  - 의료 상담, 목적 외 사용, 프롬프트 인젝션, 타 환자 개인정보 요청 즉시 차단 규칙 보강 (F-002 ~ F-005)
+  - 의료+예약 혼합 요청에서 안전한 예약 하위 요청만 분리 추출하고, 불명확한 결합 요청은 전체 reject 처리 구현 (F-006)
+  - 증상 기반 분과 안내는 허용하되 진단/치료로 이어지지 않도록 안전 분기 유지 (F-007)
+  - 급성 통증/출혈/호흡곤란, 상담원 요청/반복 불만, 보험·비용 문의 및 의사 개인 연락처 요청을 즉시 escalate하도록 규칙 확장 (F-008 ~ F-010)
+  - 예약 진행 중 이름/생년월일/전화번호 등 후속 응답은 안전 게이트에서 오탐 차단되지 않도록 예외 처리 추가
+
+- `src/agent.py` safety-first 응답 분기 보강 완료
+  - `privacy_request` → `reject`
+  - `operational_escalation` → `escalate`
+  - reasoning에 신규 safety 카테고리 근거 반영
+
+- `tests/test_safety.py` 회귀 테스트 보강 완료
+  - safety gate 선행 실행으로 `classify_intent` / `apply_policy` 미호출 검증
+  - 타 환자 정보 요청 reject 검증
+  - 상담원 요청/반복 불만 escalate 검증
+  - 보험·비용 및 의사 연락처 문의 escalate 검증
+  - 혼합 요청 분리/전면 reject, 증상 기반 분과 안내, 응급 escalate 경로 검증
+
+- 검증 완료
+  - `python -m pytest tests/test_safety.py tests/test_classifier.py tests/test_dialogue.py` → **56 passed**
+  - `.ai/harness/features.json`에서 `F-001 ~ F-010` `passes: true` 반영 완료
+
 ## Storage implementation completed (2026-03-25)
 - `src/storage.py` 구현 완료
   - `data/bookings.json`을 진실원천으로 유지하는 영속 저장소 계층 정비

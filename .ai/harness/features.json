@@ -24,6 +24,7 @@
       "policy_ref": "policy_digest §0.3, §4",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_safety.py"
     },
     {
@@ -34,6 +35,7 @@
       "policy_ref": "policy_digest §4.1",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_safety.py"
     },
     {
@@ -44,6 +46,7 @@
       "policy_ref": "policy_digest §4.2",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_safety.py"
     },
     {
@@ -54,6 +57,7 @@
       "policy_ref": "policy_digest §4.1",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_safety.py"
     },
     {
@@ -63,7 +67,9 @@
       "description": "다른 환자의 예약/개인정보 조회 시도는 즉시 reject.",
       "policy_ref": "policy_digest §4.1",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_safety.py"
     },
     {
       "id": "F-006",
@@ -73,6 +79,7 @@
       "policy_ref": "policy_digest §4.3",
       "priority": 2,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_safety.py"
     },
     {
@@ -83,6 +90,7 @@
       "policy_ref": "policy_digest §4.4, §8.5",
       "priority": 2,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_safety.py"
     },
     {
@@ -93,6 +101,7 @@
       "policy_ref": "policy_digest §4.2, §3.3",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_safety.py"
     },
     {
@@ -102,7 +111,9 @@
       "description": "2회 이상 불만 표현, 명시적 상담원 요청 시 escalate.",
       "policy_ref": "policy_digest §4.2, §10",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_safety.py"
     },
     {
       "id": "F-010",
@@ -111,7 +122,9 @@
       "description": "의사 전화번호·개인정보 요청, 보험·MRI 비용 등 구체적 운영 정보 문의는 escalate.",
       "policy_ref": "policy_digest §4.2, §10",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_safety.py"
     },
     {
       "id": "F-011",

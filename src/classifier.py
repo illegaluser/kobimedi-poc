@@ -92,12 +92,41 @@ OFF_TOPIC_PATTERNS = [
 COMPLAINT_ESCALATION_PATTERNS = [
     r"책임자 연결",
     r"상담원 연결",
+    r"상담사 연결",
+    r"직원 연결",
+    r"사람(이랑|하고)?\s*(연결|상담)",
+    r"담당자 연결",
     r"화가 나",
     r"세 번째 전화",
+    r"두 번이나 말",
     r"다른 병원 가",
     r"도대체 병원이 왜",
     r"왜 이렇게 어려운",
     r"매번 이러면",
+]
+
+PRIVACY_REQUEST_PATTERNS = [
+    r"다른 환자.*(예약|정보|개인정보|전화번호|연락처)",
+    r"타 환자.*(예약|정보|개인정보|전화번호|연락처)",
+    r"남의 예약",
+    r"다른 사람.*예약.*(보여|알려|조회)",
+    r"환자.*개인정보.*(보여|알려|조회)",
+    r"다른 환자.*누구",
+]
+
+OPERATIONAL_ESCALATION_PATTERNS = [
+    r"보험.*(적용|처리|문의|되나요|되는지)",
+    r"실비.*(청구|보험|가능)",
+    r"(MRI|CT|엠알아이|엑스레이|검사|시술|진료).*(비용|가격|얼마)",
+    r"비용.*(얼마|문의|알려)",
+    r"가격.*(얼마|문의|알려)",
+]
+
+DOCTOR_CONTACT_PATTERNS = [
+    r"원장님.*(전화번호|연락처|휴대폰|번호)",
+    r"의사.*(전화번호|연락처|휴대폰|번호)",
+    r"개인.*(전화번호|연락처|번호)",
+    r"직통.*번호",
 ]
 
 MEDICAL_ADVICE_PATTERNS = [
@@ -423,6 +452,18 @@ def _is_conversation_continuation(text: str) -> bool:
     return any(re.fullmatch(pattern, text) for pattern in CONVERSATION_CONTINUATION_PATTERNS)
 
 
+def _is_identity_followup(text: str) -> bool:
+    if re.fullmatch(r"[가-힣A-Za-z]{2,20}", text):
+        return True
+    if re.fullmatch(r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}", text):
+        return True
+    if re.fullmatch(r"\d{8}", text):
+        return True
+    if re.fullmatch(r"01[0-9][- ]?\d{3,4}[- ]?\d{4}", text):
+        return True
+    return False
+
+
 def _split_message_segments(text: str) -> list[str]:
     segments = re.split(r"(?:[?!。.!]+|\s*(?:그리고|그리고요|근데|그런데|그럼|또)\s*)", text)
     return [segment.strip(" ,") for segment in segments if segment and segment.strip(" ,")]
@@ -673,10 +714,24 @@ def safety_check(user_message: str) -> dict:
         })
         return result
 
+    if _contains_any(text, PRIVACY_REQUEST_PATTERNS):
+        result.update({
+            "category": "privacy_request",
+            "reason": "타 환자 예약 정보 또는 개인정보 요청 감지",
+        })
+        return result
+
     if _contains_any(text, COMPLAINT_ESCALATION_PATTERNS):
         result.update({
             "category": "complaint",
             "reason": "강한 불만 또는 상담원 연결 요청 감지",
+        })
+        return result
+
+    if _contains_any(text, OPERATIONAL_ESCALATION_PATTERNS) or _contains_any(text, DOCTOR_CONTACT_PATTERNS):
+        result.update({
+            "category": "operational_escalation",
+            "reason": "보험/비용 문의 또는 의사 개인 연락처 요청 감지",
         })
         return result
 
@@ -692,6 +747,13 @@ def safety_check(user_message: str) -> dict:
         result.update({
             "category": "safe",
             "reason": "후속 확인 또는 선택 응답으로 판단",
+        })
+        return result
+
+    if _is_identity_followup(text):
+        result.update({
+            "category": "safe",
+            "reason": "예약 진행 중 필요한 신원/연락처 후속 응답으로 판단",
         })
         return result
 
