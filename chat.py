@@ -16,15 +16,18 @@ def main():
     except FileNotFoundError:
         all_appointments = []
     
-    # For this PoC, we'll simulate being a single user, 'user-123',
-    # who has an existing appointment.
-    customer_id = "user-123"
+    # 사용자 이름을 입력받아 기존/신규 사용자를 구분합니다.
+    # (예: 최유진, 서장훈, 또는 목록에 없는 이름)
+    customer_name = input("사용자 이름을 입력하세요: ")
+    if not customer_name:
+        customer_name = "신규사용자" # Default for empty input
+
     existing_appointment = next(
-        (appt for appt in all_appointments if appt["customer_id"] == customer_id), 
+        (appt for appt in all_appointments if appt["customer_name"] == customer_name),
         None
     )
     if existing_appointment:
-        print(f"({customer_id}님, 기존 예약이 확인되었습니다.)")
+        print(f"({customer_name}님, 기존 예약이 확인되었습니다.)")
 
 
     while True:
@@ -36,7 +39,7 @@ def main():
 
             # Create a ticket from the user's message
             ticket = {
-                "customer_id": customer_id,
+                "customer_name": customer_name,
                 "message": user_message,
                 # In a real chat, we'd need to parse time/type from the message.
                 # We'll add dummy data here that tests might rely on.

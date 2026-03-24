@@ -246,8 +246,87 @@ Hidden Test는 의미뿐 아니라 포맷도 볼 가능성이 높다. 따라서 
 
 ---
 
-### 9. 결론
+### 9. Q4 cal.com 연동 계획 (선택과제)
+
+현재 코드베이스는 Q2/Q3 중심의 로컬 정책·로컬 데이터 기반 PoC이며, cal.com 연동은 아직 미구현 상태다. 다만 공식 문서 기준으로 Q4는 **API v2 + API Key(or OAuth)** 조합으로 구현 가능하며, 현재 확인된 최단 경로는 API key 기반 연동이다.
+
+#### 9.1 외부 선행 준비 체크리스트
+
+Q4 구현 전 cal.com 대시보드에서 아래 준비가 완료되어야 한다.
+
+- cal.com 계정 생성
+- API Key 발급
+- Event Type 3개 생성
+  - `ent-consultation` (이비인후과)
+  - `internal-medicine` (내과)
+  - `orthopedics` (정형외과)
+- 각 Event Type이 실제 예약 가능 상태인지 확인
+- 병원 데모용 캘린더 연결 및 timezone 확인
+- 최종 데모 시 cal.com 캘린더 생성 스크린샷 1~2장 확보
+
+#### 9.2 구현 대상 범위
+
+Q4는 기존 `book_appointment` 흐름을 아래처럼 확장한다.
+
+```text
+book_appointment 판정
+  ↓
+분과 → cal.com Event Type 매핑
+  ↓
+cal.com available slots 조회
+  ↓
+가용 시간 제안 응답
+  ↓
+사용자 확인
+  ↓
+cal.com booking 생성
+  ↓
+생성 결과를 chat/run 공통 응답에 반영
+```
+
+핵심은 `chat.py`, `run.py`가 직접 cal.com을 호출하지 않고, 반드시 `src/agent.py` 공통 로직과 별도 client 계층을 통해 처리하는 것이다.
+
+#### 9.3 제안 모듈 추가/변경
+
+| 파일 | 변경 내용 |
+| --- | --- |
+| `src/agent.py` | `book_appointment`에 대해 slot 조회/booking 생성 오케스트레이션 추가 |
+| `src/calcom_client.py` | cal.com API 호출 전담 (`get_available_slots`, `create_booking`) |
+| `src/config.py` 또는 동등 설정 계층 | `CALCOM_API_KEY`, base URL, API version header 로드 |
+| `src/response_builder.py` | slot 제안/booking 성공/외부 실패 응답 템플릿 확장 |
+| `run.py`, `chat.py` | 공통 Agent 인터페이스 사용만 유지, 중복 로직 추가 금지 |
+
+#### 9.4 정책 책임 분리
+
+Q4에서도 다음 원칙을 유지한다.
+
+- 안전성 게이트는 여전히 최우선이다.
+- 응급/의료 상담/목적 외 사용은 cal.com 호출 전에 차단한다.
+- `policy.py`는 24시간 변경/취소 제한, 응급 escalation 등 **병원 정책 판정**을 계속 담당한다.
+- 실제 슬롯 가능 여부는 cal.com `available slots` 응답을 우선 신뢰한다.
+- 외부 API 실패 시 절대 예약 완료라고 말하지 않는다.
+
+#### 9.5 구현 단계 계획
+
+1. `features.json`에 Q4 항목 추가
+2. cal.com 설정값 로드 계층 추가
+3. cal.com API client 작성
+4. `book_appointment` 2단계 흐름 구현
+5. mock 기반 테스트 추가
+6. 실제 API smoke test 및 캘린더 스크린샷 확보
+
+#### 9.6 현재 상태 기준 구현 리스크
+
+현재는 Event Type 3개가 아직 생성되지 않았으므로, 즉시 실 booking까지 검증할 수는 없다. 따라서 구현 초기에는 다음 전략이 합리적이다.
+
+- 먼저 문서와 feature에 Q4 범위를 고정
+- 코드에서는 설정/어댑터/안전 폴백 구조부터 구현
+- Event Type 생성 후 실제 slot 조회 및 booking 생성으로 마무리 검증
+
+### 10. 결론
 
 Q2 Agent의 핵심은 “LLM이 알아서 다 하는 예약 봇”이 아니라, **안전성 게이트와 결정론 정책을 중심에 두고 LLM을 제한적으로 사용하는 예약 자동화 파이프라인**이다. 이 구조는 과제의 Hard Constraint를 우선 충족하면서도, 인터랙티브 데모와 배치 평가를 동일한 로직으로 일관되게 처리할 수 있게 해준다.
 
 특히 `safety-first`, `shared agent core`, `deterministic policy + LLM hybrid`, `local structured model`이라는 네 가지 축은 Hidden Test와 실제 운영 리스크를 동시에 방어하기 위한 설계 결정이다.
+
+Q4는 이 구조를 뒤집는 것이 아니라, `book_appointment` 성공 경로 뒤에 **외부 스케줄러 연동 계층**을 붙이는 확장 작업이다. 따라서 Q4를 구현하더라도 중심 원칙은 그대로 유지되어야 하며, 외부 연동 실패 역시 safety-first 철학 아래 보수적으로 처리되어야 한다.

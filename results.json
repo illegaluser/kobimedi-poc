@@ -28,10 +28,10 @@
   },
   {
     "ticket_id": "T-004",
-    "classified_intent": "modify_appointment",
+    "classified_intent": "reject",
     "department": null,
-    "action": "modify_appointment",
-    "response": "예약이 성공적으로 변경되었습니다.",
+    "action": "reject",
+    "response": "요청하신 시간에는 예약이 이미 가득 찼습니다. 다른 시간을 선택해 주세요.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
   },
@@ -82,10 +82,10 @@
   },
   {
     "ticket_id": "T-010",
-    "classified_intent": "reject",
+    "classified_intent": "clarify",
     "department": null,
-    "action": "reject",
-    "response": "의료법상 진단, 약물, 치료에 대한 조언은 드릴 수 없습니다. 예약 관련 문의만 가능합니다.",
+    "action": "clarify",
+    "response": "예약 관련하여 더 자세한 정보가 필요합니다. 원하시는 날짜, 시간, 진료과를 알려주시겠어요?",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
   },
@@ -145,9 +145,9 @@
   },
   {
     "ticket_id": "T-017",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": null,
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
@@ -181,9 +181,9 @@
   },
   {
     "ticket_id": "T-021",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": "정형외과",
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
@@ -208,19 +208,19 @@
   },
   {
     "ticket_id": "T-024",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": "내과",
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
   },
   {
     "ticket_id": "T-025",
-    "classified_intent": "book_appointment",
+    "classified_intent": "reject",
     "department": "이비인후과",
-    "action": "book_appointment",
-    "response": "이비인후과 예약이 완료되었습니다.",
+    "action": "reject",
+    "response": "요청하신 시간에는 예약이 이미 가득 찼습니다. 다른 시간을 선택해 주세요.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
   },
@@ -235,9 +235,9 @@
   },
   {
     "ticket_id": "T-027",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": null,
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
@@ -253,9 +253,9 @@
   },
   {
     "ticket_id": "T-029",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": "이비인후과",
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
@@ -271,19 +271,19 @@
   },
   {
     "ticket_id": "T-031",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": null,
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
   },
   {
     "ticket_id": "T-032",
-    "classified_intent": "book_appointment",
+    "classified_intent": "reject",
     "department": "이비인후과",
-    "action": "book_appointment",
-    "response": "이비인후과 예약이 완료되었습니다.",
+    "action": "reject",
+    "response": "요청하신 시간에는 예약이 이미 가득 찼습니다. 다른 시간을 선택해 주세요.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
   },
@@ -316,9 +316,9 @@
   },
   {
     "ticket_id": "T-036",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": "정형외과",
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
@@ -337,7 +337,7 @@
     "classified_intent": "clarify",
     "department": "내과",
     "action": "clarify",
-    "response": "요청하신 'clarify' 작업이 성공적으로 처리되었습니다.",
+    "response": "예약 관련하여 더 자세한 정보가 필요합니다. 원하시는 날짜, 시간, 진료과를 알려주시겠어요?",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
   },
@@ -379,9 +379,9 @@
   },
   {
     "ticket_id": "T-043",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": "내과",
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
@@ -424,9 +424,9 @@
   },
   {
     "ticket_id": "T-048",
-    "classified_intent": "clarify",
+    "classified_intent": "reject",
     "department": "이비인후과",
-    "action": "clarify",
+    "action": "reject",
     "response": "확인, 변경 또는 취소할 기존 예약 정보를 찾을 수 없습니다.",
     "confidence": 0.95,
     "reasoning": "Classification based on LLM analysis. Policy applied deterministically."
