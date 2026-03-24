@@ -1,10 +1,8 @@
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import Mock
 
 from .classifier import safety_check, classify_intent
@@ -16,6 +14,7 @@ from .response_builder import (
     build_response,
     build_success_message,
 )
+from .storage import create_booking, find_bookings, load_bookings
 
 
 AFFIRMATIVE_PATTERNS = [r"^네$", r"^예$", r"^넵$", r"^맞아요$", r"좋아요", r"진행", r"예약해", r"확정"]
@@ -35,11 +34,7 @@ classify_safety = safety_check
 
 
 def _load_appointments_from_disk() -> list[dict]:
-    appointments_path = Path(__file__).resolve().parent.parent / "data" / "appointments.json"
-    try:
-        return json.loads(appointments_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+    return load_bookings()
 
 
 def create_session(
@@ -625,12 +620,55 @@ def _extract_candidate_slots(appointment: dict, now: datetime) -> dict:
     }
 
 
+def _appointment_identity(appointment: dict) -> tuple:
+    return (
+        appointment.get("id"),
+        appointment.get("customer_name"),
+        appointment.get("booking_time"),
+        appointment.get("date"),
+        appointment.get("time"),
+        appointment.get("department"),
+    )
+
+
+def _merge_appointment_sources(*appointment_groups: list[dict]) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[tuple] = set()
+
+    for group in appointment_groups:
+        for appointment in group or []:
+            if not isinstance(appointment, dict):
+                continue
+            identity = _appointment_identity(appointment)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            merged.append(appointment)
+
+    return merged
+
+
+def _load_storage_appointments(customer_name: str | None) -> list[dict]:
+    if not customer_name:
+        return []
+    try:
+        return find_bookings(customer_name=customer_name)
+    except Exception:
+        return []
+
+
 def _find_customer_appointments(ticket: dict, all_appointments: list[dict], existing_appointment: dict | None) -> list[dict]:
     customer_name = ticket.get("customer_name")
+    storage_matches = _load_storage_appointments(customer_name)
+
     if customer_name:
         matches = [appointment for appointment in all_appointments if appointment.get("customer_name") == customer_name]
-        if matches:
-            return matches
+        merged_matches = _merge_appointment_sources(storage_matches, matches)
+        if merged_matches:
+            return merged_matches
+
+    if storage_matches:
+        return storage_matches
     if existing_appointment:
         return [existing_appointment]
     return []
@@ -672,6 +710,7 @@ def _resolve_candidate_selection(message: str, candidates: list[dict], now: date
 def _handle_pending_confirmation(
     user_message: str,
     session_state: dict,
+    all_appointments: list[dict],
     now: datetime,
     *,
     ticket: dict | None = None,
@@ -684,6 +723,27 @@ def _handle_pending_confirmation(
     if _is_affirmative(user_message):
         appointment = pending_confirmation.get("appointment", {})
         action = pending_confirmation.get("action", "book_appointment")
+        if action == "book_appointment":
+            try:
+                persisted_booking = create_booking(appointment)
+            except Exception:
+                return _build_response_and_record(
+                    session_state,
+                    action="clarify",
+                    message="예약 정보를 저장하는 중 문제가 발생했습니다. 다시 한 번 확인해 드릴까요?",
+                    department=appointment.get("department"),
+                    ticket=ticket,
+                    classified_intent="book_appointment",
+                    intent_result={
+                        "action": "book_appointment",
+                        "department": appointment.get("department"),
+                        "date": appointment.get("date"),
+                        "time": appointment.get("time"),
+                    },
+                    customer_type=customer_type or appointment.get("customer_type"),
+                )
+            all_appointments.append(persisted_booking)
+            appointment = persisted_booking
         message = build_success_message(action, department=appointment.get("department"), appointment=appointment, now=now)
         _clear_dialogue_state(session_state)
         return _build_response_and_record(
@@ -784,6 +844,7 @@ def process_ticket(
         pending_confirmation_result = _handle_pending_confirmation(
             user_message,
             state,
+            all_appointments,
             now,
             ticket=ticket,
             customer_type=customer_type,
@@ -979,7 +1040,7 @@ def process_ticket(
             customer_type=customer_type,
         )
 
-    if action == "book_appointment" and state is not None:
+    if action == "book_appointment":
         appointment = {
             "customer_name": ticket.get("customer_name"),
             "department": department,
@@ -988,7 +1049,8 @@ def process_ticket(
             "booking_time": booking_time,
             "customer_type": customer_type,
         }
-        state["pending_confirmation"] = {"action": "book_appointment", "appointment": appointment}
+        if state is not None:
+            state["pending_confirmation"] = {"action": "book_appointment", "appointment": appointment}
         message = build_confirmation_question(appointment, now)
         return _build_response_and_record(
             state,

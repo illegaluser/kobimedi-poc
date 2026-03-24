@@ -24,9 +24,17 @@
   - `src/policy.py`: 1시간 3명 정원, 정확히 24시간 허용, 23시간 59분 불가, 초진 40분/재진 30분 겹침 계산, 당일 일반 예약 보수 처리, 대체 슬롯 탐색이 모두 동일 정책 함수 안에서 결정론적으로 유지되도록 정리
   - `tests/test_policy.py`: F-018 저장소 진실원천, stale context 무시, 명시적 `now` 주입(F-040) 회귀 테스트를 추가
   - 검증: `python -m pytest tests/test_policy.py -v` (13 passed), `python -m pytest tests/ -v` (63 passed)
+- 구현: Dialogue Phase(F-012~F-014) 완료
+  - `src/agent.py`: `session_state.accumulated_slots`를 유지하며 clarify 이후 사용자가 추가로 제공한 분과/날짜/시간을 이전 슬롯과 병합하도록 보강
+  - `src/agent.py`: 예약 요청이 충분하고 정책을 통과하면 항상 `pending_confirmation` 제안 단계(`~로 예약할까요?`)를 반환하고, 사용자 확인(`네`) 이후에만 `storage.create_booking()`으로 영속 저장 후 확정 응답하도록 변경
+  - `src/agent.py`: `run.py`의 단일 턴(batch) 경로에서도 같은 코어를 사용하되, 세션이 없으면 확정 대신 제안 결과만 반환하도록 정렬
+  - `src/agent.py`: modify/cancel/check에서 저장소(`data/bookings.json`)와 현재 입력 후보를 함께 보고, 고객 예약이 2건 이상이면 `pending_candidates`를 세팅해 후속 턴 선택으로 해소하도록 구현
+  - `src/response_builder.py`: 다수 예약 모호성 응답을 "어떤 예약인지 선택해주세요" 형식으로 통일
+  - `tests/test_dialogue.py`: 멀티턴 슬롯 누적, 2단계 예약 확정, 복수 예약 후보 선택, batch 단일 턴 제안 회귀 테스트를 보강
+  - 검증: `python -m pytest tests/ -v` 통과 (63 passed)
 
 ## Next step
-- Phase 1 저장소 계층 도입 및 영속화 연결 (F-036~F-039)
+- Phase 6 Persistence 연결 및 저장소 신뢰성 보강 (F-036~F-039)
 
 ## Evaluation notes
 - 현재 gold label은 AI 보조 초안이므로 제출 전 반드시 사람이 최종 검수해야 함
@@ -34,10 +42,11 @@
 - 다만 F-025 수용기준인 gold_cases 기반 비교 실행 자체는 가능해짐
 
 ## Known issues
-- `src/policy.py` 수준에서는 저장소 조회 훅(`find_bookings`)만 연결되었고, 실제 영속 저장소 CRUD 계층(`src/storage.py`) 및 agent persist 연결(F-036~F-039)은 아직 미구현 상태임
+- 없음 (현재 테스트는 모두 통과)
 - 참고: `.ai/harness/features.json`의 F-001~F-005는 이번 작업 시작 전부터 이미 `passes=true`로 기록되어 있어 값 유지로 검증을 반영함
 - 참고: `.ai/harness/features.json`의 F-006~F-011 역시 작업 시작 시점에 이미 `passes=true`였으며, 이번 Phase에서는 구현/회귀 검증을 통해 해당 상태를 재확인함
-- 참고: F-015, F-016, F-017, F-019, F-020, F-040은 작업 시작 전부터 `passes=true`였고, 이번 Phase에서는 정책 경계값 및 now 주입 회귀를 다시 검증함
+- 참고: F-015, F-016, F-017, F-019, F-020, F-040은 이전 Phase에서 이미 `passes=true`였고, 현재도 회귀 없이 유지됨
+- 참고: `.ai/harness/features.json`의 F-012~F-014도 작업 시작 시점에 이미 `passes=true`였으나, 이번 Phase에서 실제 dialogue 구현과 회귀 테스트를 완료해 해당 상태를 검증함
 
 ## Submission readiness
 - policy_digest.md: ready
@@ -49,3 +58,4 @@
 - Phase 2 safety implementation: ready
 - Phase 3 classification/extraction implementation: ready
 - Phase 4 policy implementation (F-015~F-020, F-040): ready
+- Phase 5 dialogue implementation: ready

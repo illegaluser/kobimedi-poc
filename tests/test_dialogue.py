@@ -95,12 +95,24 @@ def test_F012_multiturn_clarify_accumulates_slots(
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
 @patch("src.agent.classify_safety")
+@patch("src.agent.create_booking")
 def test_F013_two_step_confirmation_flow(
+    mock_create_booking,
     mock_classify_safety,
     mock_classify_intent,
     mock_apply_policy,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
+    mock_create_booking.return_value = {
+        "id": "booking-001",
+        "customer_name": "김민수",
+        "department": "내과",
+        "date": "2026-03-25",
+        "time": "14:00",
+        "booking_time": "2026-03-25T14:00:00+00:00",
+        "customer_type": "재진",
+        "status": "active",
+    }
     mock_classify_intent.return_value = {
         "action": "book_appointment",
         "department": "내과",
@@ -152,6 +164,7 @@ def test_F013_two_step_confirmation_flow(
     assert confirmed_result["action"] == "book_appointment"
     assert "예약이 완료되었습니다" in confirmed_result["response"]
     assert session_state["pending_confirmation"] is None
+    mock_create_booking.assert_called_once()
     mock_classify_safety.assert_not_called()
     mock_classify_intent.assert_not_called()
     mock_apply_policy.assert_not_called()
@@ -210,7 +223,7 @@ def test_F014_ambiguous_cancel_requires_choice_and_resolves(
     )
 
     assert clarify_result["action"] == "clarify"
-    assert "어떤 예약을 취소" in clarify_result["response"]
+    assert "어떤 예약인지 선택해주세요" in clarify_result["response"]
     assert "1)" in clarify_result["response"]
     assert "2)" in clarify_result["response"]
     assert len(session_state["pending_candidates"]) == 2
@@ -273,5 +286,6 @@ def test_batch_like_call_without_session_state_remains_single_turn(
         now=REFERENCE_NOW,
     )
 
-    assert result["action"] == "book_appointment"
-    assert "예약이 완료되었습니다" in result["response"]
+    assert result["action"] == "clarify"
+    assert "예약할까요" in result["response"]
+    assert result["classified_intent"] == "book_appointment"

@@ -145,18 +145,12 @@ def build_appointment_options_question(
     candidate_appointments: list[dict],
     now: datetime | None = None,
 ) -> str:
-    action_text_map = {
-        "cancel_appointment": "취소",
-        "modify_appointment": "변경",
-        "check_appointment": "확인",
-    }
-    action_text = action_text_map.get(action_context, "진행")
     options = [
         f"{index}) {format_appointment_summary(appointment, now)}"
         for index, appointment in enumerate(candidate_appointments, start=1)
     ]
     option_text = ", ".join(options)
-    return f"어떤 예약을 {action_text}할까요? {option_text}"
+    return f"어떤 예약인지 선택해주세요. {option_text}"
 
 
 def build_success_message(
