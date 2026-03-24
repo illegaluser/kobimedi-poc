@@ -23,49 +23,113 @@ def _mock_ollama_payload(payload: dict | None = None) -> dict:
             {
                 "action": "book_appointment",
                 "department": "이비인후과",
+                "doctor_name": None,
                 "date": "2026-03-25",
                 "time": "14:00",
+                "customer_type": None,
                 "is_first_visit": False,
                 "missing_info": [],
+                "target_appointment_hint": None,
+            },
+            {
+                "action": "clarify",
+                "department": "이비인후과",
+                "doctor_name": None,
+                "date": "2026-03-25",
+                "time": "14:00",
+                "customer_type": None,
+                "missing_info": ["customer_type"],
+                "target_appointment_hint": None,
+            },
+        ),
+        (
+            "내일 오후 2시 이비인후과 초진 예약",
+            {
+                "action": "book_appointment",
+                "department": "이비인후과",
+                "doctor_name": None,
+                "date": "2026-03-25",
+                "time": "14:00",
+                "customer_type": "초진",
+                "is_first_visit": True,
+                "missing_info": [],
+                "target_appointment_hint": None,
             },
             {
                 "action": "book_appointment",
                 "department": "이비인후과",
+                "doctor_name": None,
                 "date": "2026-03-25",
                 "time": "14:00",
+                "customer_type": "초진",
                 "missing_info": [],
+                "target_appointment_hint": None,
             },
         ),
         (
-            "수요일 예약을 목요일로 변경해주세요",
+            "수요일 예약을 목요일 오후 3시로 변경해주세요",
             {
                 "action": "modify_appointment",
                 "department": None,
-                "date": None,
-                "time": None,
-                "is_first_visit": False,
+                "doctor_name": None,
+                "date": "2026-03-26",
+                "time": "15:00",
+                "customer_type": None,
+                "is_first_visit": None,
                 "missing_info": [],
+                "target_appointment_hint": {
+                    "appointment_id": None,
+                    "department": None,
+                    "doctor_name": None,
+                    "date": "2026-03-25",
+                    "time": None,
+                    "booking_time": None,
+                },
             },
             {
                 "action": "modify_appointment",
                 "department": None,
+                "doctor_name": None,
+                "date": "2026-03-26",
+                "time": "15:00",
+                "customer_type": None,
                 "missing_info": [],
+                "target_appointment_hint": {"date": "2026-03-25"},
             },
         ),
         (
-            "금요일 예약 취소",
+            "금요일 오후 4시 내과 예약 취소",
             {
                 "action": "cancel_appointment",
-                "department": None,
-                "date": None,
-                "time": None,
-                "is_first_visit": False,
+                "department": "내과",
+                "doctor_name": None,
+                "date": "2026-03-27",
+                "time": "16:00",
+                "customer_type": None,
+                "is_first_visit": None,
                 "missing_info": [],
+                "target_appointment_hint": {
+                    "appointment_id": None,
+                    "department": "내과",
+                    "doctor_name": None,
+                    "date": "2026-03-27",
+                    "time": "16:00",
+                    "booking_time": None,
+                },
             },
             {
                 "action": "cancel_appointment",
-                "department": None,
+                "department": "내과",
+                "doctor_name": None,
+                "date": "2026-03-27",
+                "time": "16:00",
+                "customer_type": None,
                 "missing_info": [],
+                "target_appointment_hint": {
+                    "department": "내과",
+                    "date": "2026-03-27",
+                    "time": "16:00",
+                },
             },
         ),
         (
@@ -73,15 +137,23 @@ def _mock_ollama_payload(payload: dict | None = None) -> dict:
             {
                 "action": "check_appointment",
                 "department": None,
+                "doctor_name": None,
                 "date": None,
                 "time": None,
-                "is_first_visit": False,
+                "customer_type": None,
+                "is_first_visit": None,
                 "missing_info": [],
+                "target_appointment_hint": None,
             },
             {
-                "action": "check_appointment",
+                "action": "clarify",
                 "department": None,
-                "missing_info": [],
+                "doctor_name": None,
+                "date": None,
+                "time": None,
+                "customer_type": None,
+                "missing_info": ["appointment_target"],
+                "target_appointment_hint": None,
             },
         ),
         (
@@ -89,31 +161,23 @@ def _mock_ollama_payload(payload: dict | None = None) -> dict:
             {
                 "action": "book_appointment",
                 "department": None,
+                "doctor_name": None,
                 "date": None,
                 "time": None,
-                "is_first_visit": False,
+                "customer_type": None,
+                "is_first_visit": None,
                 "missing_info": [],
+                "target_appointment_hint": None,
             },
             {
                 "action": "clarify",
                 "department": None,
-                "missing_info": ["department", "date", "time"],
-            },
-        ),
-        (
-            "도와주세요",
-            {
-                "action": "clarify",
-                "department": None,
+                "doctor_name": None,
                 "date": None,
                 "time": None,
-                "is_first_visit": False,
-                "missing_info": [],
-            },
-            {
-                "action": "clarify",
-                "department": None,
-                "missing_info": [],
+                "customer_type": None,
+                "missing_info": ["department", "date", "time", "customer_type"],
+                "target_appointment_hint": None,
             },
         ),
         (
@@ -121,15 +185,23 @@ def _mock_ollama_payload(payload: dict | None = None) -> dict:
             {
                 "action": "clarify",
                 "department": "이비인후과",
+                "doctor_name": None,
                 "date": None,
                 "time": None,
-                "is_first_visit": False,
+                "customer_type": None,
+                "is_first_visit": None,
                 "missing_info": ["date", "time"],
+                "target_appointment_hint": None,
             },
             {
                 "action": "clarify",
                 "department": "이비인후과",
+                "doctor_name": None,
+                "date": None,
+                "time": None,
+                "customer_type": None,
                 "missing_info": ["date", "time"],
+                "target_appointment_hint": None,
             },
         ),
         (
@@ -137,33 +209,47 @@ def _mock_ollama_payload(payload: dict | None = None) -> dict:
             {
                 "action": "book_appointment",
                 "department": None,
+                "doctor_name": "이춘영 원장",
                 "date": None,
                 "time": None,
-                "is_first_visit": False,
+                "customer_type": None,
+                "is_first_visit": None,
                 "missing_info": [],
+                "target_appointment_hint": None,
             },
             {
                 "action": "clarify",
                 "department": "이비인후과",
-                "missing_info": ["date", "time"],
+                "doctor_name": "이춘영 원장",
+                "date": None,
+                "time": None,
+                "customer_type": None,
+                "missing_info": ["date", "time", "customer_type"],
+                "target_appointment_hint": None,
             },
         ),
         (
-            "다음주 수요일 오후 2시에 내과 예약",
+            "다음주 수요일 오후 2시에 내과 재진 예약",
             {
                 "action": "book_appointment",
                 "department": "내과",
+                "doctor_name": None,
                 "date": "2026-04-01",
                 "time": "14:00",
+                "customer_type": "재진",
                 "is_first_visit": False,
                 "missing_info": [],
+                "target_appointment_hint": None,
             },
             {
                 "action": "book_appointment",
                 "department": "내과",
+                "doctor_name": None,
                 "date": "2026-04-01",
                 "time": "14:00",
+                "customer_type": "재진",
                 "missing_info": [],
+                "target_appointment_hint": None,
             },
         ),
         (
@@ -171,34 +257,37 @@ def _mock_ollama_payload(payload: dict | None = None) -> dict:
             {
                 "action": "book_appointment",
                 "department": "정형외과",
+                "doctor_name": None,
                 "date": "2026-03-26",
                 "time": None,
-                "is_first_visit": False,
-                "missing_info": ["time"],
+                "customer_type": None,
+                "is_first_visit": None,
+                "missing_info": ["time", "customer_type"],
+                "target_appointment_hint": None,
             },
             {
                 "action": "clarify",
                 "department": "정형외과",
+                "doctor_name": None,
                 "date": "2026-03-26",
                 "time": None,
-                "missing_info": ["time"],
+                "customer_type": None,
+                "missing_info": ["time", "customer_type"],
+                "target_appointment_hint": None,
             },
         ),
     ],
 )
 @patch("src.classifier.ollama.chat")
-def test_classify_intent_required_scenarios(
-    mock_ollama_chat,
-    user_message,
-    llm_payload,
-    expected,
-):
+def test_classify_intent_required_scenarios(mock_ollama_chat, user_message, llm_payload, expected):
     mock_ollama_chat.return_value = _mock_ollama_payload(llm_payload)
 
     result = classify_intent(user_message, now=REFERENCE_NOW)
 
     assert result["action"] == expected["action"]
     assert result["department"] == expected["department"]
+    assert result["doctor_name"] == expected["doctor_name"]
+    assert result["customer_type"] == expected["customer_type"]
     assert result["missing_info"] == expected["missing_info"]
 
     if "date" in expected:
@@ -206,8 +295,39 @@ def test_classify_intent_required_scenarios(
     if "time" in expected:
         assert result["time"] == expected["time"]
 
+    expected_target_hint = expected["target_appointment_hint"]
+    if expected_target_hint is None:
+        assert result["target_appointment_hint"] is None
+    else:
+        assert result["target_appointment_hint"] is not None
+        for key, value in expected_target_hint.items():
+            assert result["target_appointment_hint"][key] == value
+
     assert "감기입니다" not in json.dumps(result, ensure_ascii=False)
     mock_ollama_chat.assert_called_once()
+
+
+@patch("src.classifier.ollama.chat")
+def test_classify_intent_invalid_enum_uses_rule_action(mock_ollama_chat):
+    mock_ollama_chat.return_value = _mock_ollama_payload(
+        {
+            "action": "make_booking",
+            "department": "내과",
+            "doctor_name": None,
+            "date": "2026-03-25",
+            "time": "14:00",
+            "customer_type": "재진",
+            "is_first_visit": False,
+            "missing_info": [],
+            "target_appointment_hint": None,
+        }
+    )
+
+    result = classify_intent("내일 오후 2시 내과 재진 예약", now=REFERENCE_NOW)
+
+    assert result["action"] == "book_appointment"
+    assert result["department"] == "내과"
+    assert result["customer_type"] == "재진"
 
 
 @patch("src.classifier.ollama.chat")
@@ -230,18 +350,22 @@ def test_classify_intent_json_decode_error_retries_once(mock_ollama_chat):
             {
                 "action": "book_appointment",
                 "department": "내과",
+                "doctor_name": None,
                 "date": "2026-03-25",
                 "time": "14:00",
+                "customer_type": "재진",
                 "is_first_visit": False,
                 "missing_info": [],
+                "target_appointment_hint": None,
             }
         ),
     ]
 
-    result = classify_intent("내일 오후 2시 내과 예약", now=REFERENCE_NOW)
+    result = classify_intent("내일 오후 2시 내과 재진 예약", now=REFERENCE_NOW)
 
     assert result["action"] == "book_appointment"
     assert result["department"] == "내과"
+    assert result["customer_type"] == "재진"
     assert result["date"] == "2026-03-25"
     assert result["time"] == "14:00"
     assert mock_ollama_chat.call_count == 2
@@ -279,16 +403,20 @@ def test_classify_intent_prefers_doctor_department_mapping(mock_ollama_chat):
         {
             "action": "book_appointment",
             "department": None,
+            "doctor_name": None,
             "date": None,
             "time": None,
-            "is_first_visit": False,
+            "customer_type": None,
+            "is_first_visit": None,
             "missing_info": [],
+            "target_appointment_hint": None,
         }
     )
 
     result = classify_intent("김만수 원장님 예약", now=REFERENCE_NOW)
 
     assert result["department"] == "내과"
+    assert result["doctor_name"] == "김만수 원장"
     assert result["action"] == "clarify"
-    assert result["missing_info"] == ["date", "time"]
+    assert result["missing_info"] == ["date", "time", "customer_type"]
 

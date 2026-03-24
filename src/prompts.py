@@ -72,15 +72,25 @@ Return this schema:
 {
   "action": "book_appointment",
   "department": "이비인후과",
+  "doctor_name": "이춘영 원장",
   "date": "2025-03-17",
   "time": "14:00",
+  "customer_type": "재진",
   "is_first_visit": false,
-  "missing_info": []
+  "missing_info": [],
+  "target_appointment_hint": {
+    "appointment_id": null,
+    "department": null,
+    "doctor_name": null,
+    "date": null,
+    "time": null,
+    "booking_time": null
+  }
 }
 
 Rules:
 1. Use only these departments when identifiable: 이비인후과, 내과, 정형외과. Otherwise use null.
-2. If the user names a doctor, map doctor to department:
+2. If the user names a doctor, copy doctor_name and map doctor to department:
    - 이춘영 원장 -> 이비인후과
    - 김만수 원장 -> 내과
    - 원징수 원장 -> 정형외과
@@ -89,16 +99,27 @@ Rules:
    - Bad: 감기입니다 / 비염입니다 / 약을 드세요
 4. booking intent must use book_appointment, modify intent must use modify_appointment,
    cancellation must use cancel_appointment, appointment lookup must use check_appointment.
-5. If required information is missing for the inferred task, put the missing field names in missing_info.
-6. If missing_info is non-empty, set action to clarify.
-7. Do not invent unavailable facts.
-8. date must be YYYY-MM-DD when inferable. time must be HH:MM in 24-hour format when inferable.
-9. If the user only asks which department fits symptoms, return department if inferable and action=clarify.
+5. customer_type must be one of: 초진, 재진, or null.
+6. date must be YYYY-MM-DD when inferable. time must be HH:MM in 24-hour format when inferable.
+7. For modify_appointment, extract the NEW date/time into date and time.
+   Put the EXISTING appointment identification into target_appointment_hint.
+8. For cancel_appointment and check_appointment, use target_appointment_hint for the appointment being referenced.
+9. If required information is missing for the inferred task, put only these field names in missing_info:
+   department, date, time, customer_type, appointment_target
+10. Required fields by action:
+   - book_appointment: department, date, time, customer_type
+   - modify_appointment: appointment_target, date, time
+   - cancel_appointment: appointment_target
+   - check_appointment: appointment_target
+11. If missing_info is non-empty, set action to clarify.
+12. If the user only asks which department fits symptoms, return department if inferable and action=clarify.
+13. Do not invent unavailable facts, diagnoses, prescriptions, or treatment advice.
 """.strip()
 
 
 CLASSIFICATION_USER_PROMPT_TEMPLATE = """
 Reference date: {reference_date}
+Reference datetime: {reference_datetime}
 User message: {user_message}
 """.strip()
 

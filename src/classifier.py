@@ -44,6 +44,19 @@ SYMPTOM_DEPARTMENT_KEYWORDS = {
     "정형외과": ["허리", "무릎", "어깨", "발목", "손목", "관절", "등이 아", "삐", "근육"],
 }
 
+CUSTOMER_TYPE_PATTERNS = {
+    "초진": ["초진", "처음 방문", "처음 내원", "첫 방문", "첫 진료", "처음 진료", "처음 가요"],
+    "재진": ["재진", "재방문", "다시 내원", "다시 방문", "기존 환자"],
+}
+
+ALLOWED_MISSING_INFO_FIELDS = {
+    "department",
+    "date",
+    "time",
+    "customer_type",
+    "appointment_target",
+}
+
 EMERGENCY_PATTERNS = [
     r"응급",
     r"급성",
@@ -175,12 +188,17 @@ def _extract_requested_department(text: str) -> str | None:
     return None
 
 
+def _normalize_doctor_name_value(raw_doctor_name: str | None) -> str | None:
+    if not raw_doctor_name:
+        return None
+    return re.sub(r"\s+", " ", str(raw_doctor_name).strip()).replace("원장님", "원장")
+
+
 def _extract_doctor_name(text: str) -> str | None:
     match = re.search(r"([가-힣A-Za-z0-9O○◯*]{2,8}\s*원장(?:님)?)", text)
     if not match:
         return None
-    doctor_name = re.sub(r"\s+", " ", match.group(1)).replace("원장님", "원장")
-    return doctor_name
+    return _normalize_doctor_name_value(match.group(1))
 
 
 def _infer_department_from_text(text: str) -> str | None:
@@ -207,6 +225,24 @@ def _normalize_department_value(raw_department: str | None) -> str | None:
 def _normalize_action_value(raw_action: str | None) -> str | None:
     if raw_action in VALID_ACTIONS:
         return raw_action
+    return None
+
+
+def _normalize_customer_type_value(raw_customer_type: str | None) -> str | None:
+    if not raw_customer_type:
+        return None
+    text = str(raw_customer_type).strip()
+    if text in {"초진", "first_visit", "first", "new"}:
+        return "초진"
+    if text in {"재진", "returning", "follow_up", "follow-up", "revisit"}:
+        return "재진"
+    return None
+
+
+def _extract_customer_type_from_text(text: str) -> str | None:
+    for customer_type, keywords in CUSTOMER_TYPE_PATTERNS.items():
+        if any(keyword in text for keyword in keywords):
+            return customer_type
     return None
 
 
@@ -242,9 +278,27 @@ def _normalize_missing_info(raw_missing_info) -> list[str]:
         if not isinstance(item, str):
             continue
         item = item.strip()
-        if item and item not in normalized:
+        if item in ALLOWED_MISSING_INFO_FIELDS and item not in normalized:
             normalized.append(item)
     return normalized
+
+
+def _normalize_target_appointment_hint(raw_target_hint) -> dict | None:
+    if not isinstance(raw_target_hint, dict):
+        return None
+
+    normalized = {
+        "appointment_id": raw_target_hint.get("appointment_id"),
+        "department": _normalize_department_value(raw_target_hint.get("department")),
+        "doctor_name": _normalize_doctor_name_value(raw_target_hint.get("doctor_name")),
+        "date": _normalize_date_value(raw_target_hint.get("date")),
+        "time": _normalize_time_value(raw_target_hint.get("time")),
+        "booking_time": raw_target_hint.get("booking_time"),
+    }
+
+    if any(value for value in normalized.values()):
+        return normalized
+    return None
 
 
 def _extract_time_from_text(text: str) -> str | None:
@@ -343,14 +397,22 @@ def _extract_date_from_text(text: str, now: datetime) -> str | None:
     return None
 
 
-def _extract_first_visit(text: str, llm_result: dict | None = None) -> bool:
+def _extract_first_visit(
+    text: str,
+    customer_type: str | None = None,
+    llm_result: dict | None = None,
+) -> bool | None:
+    if customer_type == "초진":
+        return True
+    if customer_type == "재진":
+        return False
+    if isinstance(llm_result, dict) and isinstance(llm_result.get("is_first_visit"), bool):
+        return llm_result.get("is_first_visit")
     if "초진" in text or "처음" in text:
         return True
     if "재진" in text:
         return False
-    if isinstance(llm_result, dict):
-        return bool(llm_result.get("is_first_visit", False))
-    return False
+    return None
 
 
 def _has_temporal_hint(text: str) -> bool:
@@ -411,7 +473,55 @@ def _infer_action_from_text(text: str) -> str:
     return "clarify"
 
 
-def _determine_missing_info(action: str, department: str | None, date: str | None, time: str | None, text: str) -> list[str]:
+def _extract_rule_target_appointment_hint(
+    action: str,
+    department: str | None,
+    doctor_name: str | None,
+    date: str | None,
+    time: str | None,
+) -> dict | None:
+    if action not in {"cancel_appointment", "check_appointment"}:
+        return None
+
+    hint = {
+        "appointment_id": None,
+        "department": department,
+        "doctor_name": doctor_name,
+        "date": date,
+        "time": time,
+        "booking_time": None,
+    }
+    if any(value for value in hint.values()):
+        return hint
+    return None
+
+
+def _has_target_appointment_identifier(target_hint: dict | None) -> bool:
+    if not target_hint:
+        return False
+    return any(
+        target_hint.get(key)
+        for key in ["appointment_id", "department", "doctor_name", "date", "time", "booking_time"]
+    )
+
+
+def _merge_missing_info(computed_missing_info: list[str], llm_missing_info: list[str]) -> list[str]:
+    merged: list[str] = []
+    for item in [*(computed_missing_info or []), *(llm_missing_info or [])]:
+        if item not in merged:
+            merged.append(item)
+    return merged
+
+
+def _determine_missing_info(
+    action: str,
+    department: str | None,
+    date: str | None,
+    time: str | None,
+    customer_type: str | None,
+    text: str,
+    target_appointment_hint: dict | None,
+) -> list[str]:
     missing_info: list[str] = []
 
     if action == "book_appointment":
@@ -421,33 +531,56 @@ def _determine_missing_info(action: str, department: str | None, date: str | Non
             missing_info.append("date")
         if time is None:
             missing_info.append("time")
+        if customer_type is None:
+            missing_info.append("customer_type")
         return missing_info
 
-    if action in {"modify_appointment", "cancel_appointment", "check_appointment"}:
-        if not department and not date and not time and not _has_temporal_hint(text):
+    if action == "modify_appointment":
+        if not _has_target_appointment_identifier(target_appointment_hint):
+            missing_info.append("appointment_target")
+        if date is None:
+            missing_info.append("date")
+        if time is None:
+            missing_info.append("time")
+        return missing_info
+
+    if action in {"cancel_appointment", "check_appointment"}:
+        if not _has_target_appointment_identifier(target_appointment_hint):
             missing_info.append("appointment_target")
         return missing_info
 
     if action == "clarify":
-        if department is None and (_is_department_guidance_request(text) or _is_booking_related(text)):
-            missing_info.append("department")
-        if date is None and (_is_booking_related(text) or _infer_department_from_text(text)):
-            missing_info.append("date")
-        if time is None and (_is_booking_related(text) or _infer_department_from_text(text)):
-            missing_info.append("time")
+        if _is_department_guidance_request(text) and not _is_booking_related(text):
+            if department is None:
+                missing_info.append("department")
+            if date is None:
+                missing_info.append("date")
+            if time is None:
+                missing_info.append("time")
+            return missing_info
+
+        if _is_booking_related(text) or department or date or time:
+            if department is None:
+                missing_info.append("department")
+            if date is None:
+                missing_info.append("date")
+            if time is None:
+                missing_info.append("time")
+            if customer_type is None:
+                missing_info.append("customer_type")
         return missing_info
 
     return missing_info
 
 
 def _call_intent_llm(user_message: str, now: datetime) -> dict:
-    reference_date = now.date().isoformat()
     messages = [
         {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
         {
             "role": "user",
             "content": CLASSIFICATION_USER_PROMPT_TEMPLATE.format(
-                reference_date=reference_date,
+                reference_date=now.date().isoformat(),
+                reference_datetime=now.isoformat(),
                 user_message=user_message,
             ),
         },
@@ -678,18 +811,56 @@ def _classify_intent(user_message: str, now: datetime | None = None) -> dict:
     llm_action = _normalize_action_value(llm_result.get("action"))
     action = llm_action or rule_action
 
+    extracted_doctor_name = _extract_doctor_name(normalized_message)
+    llm_doctor_name = _normalize_doctor_name_value(llm_result.get("doctor_name"))
+    doctor_name = extracted_doctor_name or llm_doctor_name
+
     explicit_department = _extract_requested_department(normalized_message)
-    inferred_department = _infer_department_from_text(normalized_message)
     llm_department = _normalize_department_value(llm_result.get("department"))
-    department = _normalize_department_value(explicit_department) or inferred_department or llm_department
+    inferred_department = _infer_department_from_text(normalized_message)
+    doctor_department = SUPPORTED_DOCTORS.get(doctor_name)
+    department = (
+        _normalize_department_value(explicit_department)
+        or doctor_department
+        or inferred_department
+        or llm_department
+    )
 
-    date = _extract_date_from_text(normalized_message, reference_now) or _normalize_date_value(llm_result.get("date"))
-    time = _extract_time_from_text(normalized_message) or _normalize_time_value(llm_result.get("time"))
-    is_first_visit = _extract_first_visit(normalized_message, llm_result)
+    llm_date = _normalize_date_value(llm_result.get("date"))
+    llm_time = _normalize_time_value(llm_result.get("time"))
+    if action == "modify_appointment":
+        date = llm_date or _extract_date_from_text(normalized_message, reference_now)
+        time = llm_time or _extract_time_from_text(normalized_message)
+    else:
+        date = _extract_date_from_text(normalized_message, reference_now) or llm_date
+        time = _extract_time_from_text(normalized_message) or llm_time
 
-    computed_missing_info = _determine_missing_info(action, department, date, time, normalized_message)
+    customer_type = _extract_customer_type_from_text(normalized_message) or _normalize_customer_type_value(
+        llm_result.get("customer_type")
+    )
+    is_first_visit = _extract_first_visit(normalized_message, customer_type, llm_result)
+
+    llm_target_appointment_hint = _normalize_target_appointment_hint(llm_result.get("target_appointment_hint"))
+    rule_target_appointment_hint = _extract_rule_target_appointment_hint(
+        action,
+        department,
+        doctor_name,
+        date,
+        time,
+    )
+    target_appointment_hint = llm_target_appointment_hint or rule_target_appointment_hint
+
+    computed_missing_info = _determine_missing_info(
+        action,
+        department,
+        date,
+        time,
+        customer_type,
+        normalized_message,
+        target_appointment_hint,
+    )
     llm_missing_info = _normalize_missing_info(llm_result.get("missing_info"))
-    missing_info = computed_missing_info or llm_missing_info
+    missing_info = _merge_missing_info(computed_missing_info, llm_missing_info)
 
     if missing_info:
         action = "clarify"
@@ -704,13 +875,16 @@ def _classify_intent(user_message: str, now: datetime | None = None) -> dict:
     result = {
         "action": action,
         "department": department,
+        "doctor_name": doctor_name,
         "date": date,
         "time": time,
+        "customer_type": customer_type,
         "is_first_visit": is_first_visit,
         "missing_info": missing_info,
+        "target_appointment_hint": target_appointment_hint,
     }
 
-    if llm_error and action == "clarify" and not department and not date and not time:
+    if llm_error and action == "clarify" and not department and not date and not time and not customer_type:
         result["error"] = True
         result["fallback_action"] = llm_fallback_action
         if llm_fallback_message:

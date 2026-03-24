@@ -8,11 +8,23 @@ MODEL_NAME = "qwen3-coder:30b"
 TEMPORARY_ERROR_MESSAGE = "일시적 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 
 
+def _strip_code_fences(raw_content: str) -> str:
+    content = str(raw_content).strip()
+    if content.startswith("```"):
+        lines = content.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        content = "\n".join(lines).strip()
+    return content
+
+
 def safe_parse_json(raw_content: str) -> dict | None:
     if raw_content is None:
         return None
 
-    parsed = json.loads(raw_content)
+    parsed = json.loads(_strip_code_fences(raw_content))
     if isinstance(parsed, dict):
         return parsed
     return None
