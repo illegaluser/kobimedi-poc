@@ -1,5 +1,41 @@
 # Progress
 
+## Phase 3 — 의도 분류 및 LLM 예외 방어 구현 완료 (2026-03-25)
+- `src/llm_client.py` 구현 보강 완료
+  - Ollama `qwen3-coder:30b` 호출을 `format='json'`으로 강제 유지 (F-011, F-083)
+  - `build_classification_fallback()` / `build_safety_fallback()` 추가로 분류/안전성 호출별 안전 기본 payload 제공
+  - connection refused / timeout / invalid response / JSON parse fail 시 시스템 중단 대신 `clarify` 중심 폴백 payload 반환하도록 표준화 (F-012, F-084)
+  - `ollama_response_invalid`도 안전 폴백 대상으로 확장하여 잘못된 응답 구조에서 거짓 성공을 방지
+
+- `src/models.py` 구현 완료
+  - 과제 원문 7개 action을 그대로 갖는 `Action` Enum 추가
+  - classifier가 Enum 기반으로 action 값을 강제 검증하도록 공통 상수(`VALID_ACTION_VALUES`) 제공 (F-011)
+
+- `src/prompts.py` 분류 프롬프트 보강 완료
+  - 구조화 JSON 스키마에 `patient_name`, `patient_contact`, `birth_date`, `is_proxy_booking`, `is_emergency`, `symptom_keywords` 필드 추가
+  - 증상→분과 매핑은 예약 안내 목적일 뿐이며 진단/질병명 단정 금지 규칙을 시스템 프롬프트에 명시 (F-029)
+  - 대리 예약 표현 감지 및 필수 정보 부족 시 `clarify` 우선 규칙을 명시
+
+- `src/classifier.py` 구현 완료
+  - LLM action 값을 `Action` Enum으로 정규화하여 7개 허용 enum 외 값은 자동 폐기 후 규칙 기반/`clarify`로 폴백 (F-011)
+  - 날짜/시간/분과/의사명/customer_type 추출 유지 및 확장 (F-021, F-022, F-030)
+  - 자유문장에서 환자 이름/전화번호/생년월일 추출 추가 (F-023, F-024, F-025)
+  - "엄마를 대신해서", "아버지를 위해" 등 패턴의 대리 예약 감지 및 `is_proxy_booking` 신호 추출 구현 (F-026)
+  - 응급/급성 통증 신호, 기존 예약 식별 힌트, 증상 키워드 리스트 추출 추가 (F-027, F-028, F-029)
+  - LLM 실패 시에도 rule-based 엔터티가 없으면 `error=True`, `fallback_action=clarify`를 가진 안전 결과를 반환하도록 구현 (F-012)
+
+- `tests/test_classifier.py` 보강 완료
+  - 기존 action/시간/분과 분류 회귀 테스트 유지
+  - invalid enum → 안전 폴백 검증
+  - JSON parse failure / connection refused / timeout 폴백 검증
+  - 대리 예약 + 환자 정보 추출 검증
+  - 증상 기반 분과 추천 시 진단명 비생성 검증
+
+- 검증 완료
+  - `python -m pytest tests/test_classifier.py tests/test_safety.py` → **54 passed**
+  - `python -m pytest tests/test_classifier.py tests/test_safety.py tests/test_dialogue.py` → **59 passed**
+  - `.ai/harness/features.json`에서 `F-011 ~ F-014`, `F-021 ~ F-030` `passes: true` 반영 완료
+
 ## Safety gate implementation completed (2026-03-25)
 - `src/classifier.py` 안전 게이트 보강 완료
   - safety gate가 classification/policy 이전에 항상 선행되도록 파이프라인 계약 유지 (F-001)

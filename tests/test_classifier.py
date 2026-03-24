@@ -420,3 +420,79 @@ def test_classify_intent_prefers_doctor_department_mapping(mock_ollama_chat):
     assert result["action"] == "clarify"
     assert result["missing_info"] == ["date", "time", "customer_type"]
 
+
+@patch("src.classifier.ollama.chat")
+def test_classify_intent_detects_proxy_booking_and_patient_entities(mock_ollama_chat):
+    mock_ollama_chat.return_value = _mock_ollama_payload(
+        {
+            "action": "book_appointment",
+            "department": "내과",
+            "doctor_name": None,
+            "date": "2026-03-25",
+            "time": "14:00",
+            "customer_type": "초진",
+            "is_first_visit": True,
+            "patient_name": "김영희",
+            "patient_contact": "01012345678",
+            "birth_date": "1955-05-05",
+            "is_proxy_booking": True,
+            "symptom_keywords": [],
+            "missing_info": [],
+            "target_appointment_hint": None,
+        }
+    )
+
+    result = classify_intent(
+        "엄마를 대신해서 환자 이름은 김영희, 연락처는 010-1234-5678이고 생년월일은 1955-05-05입니다. 내일 오후 2시 내과 초진 예약",
+        now=REFERENCE_NOW,
+    )
+
+    assert result["action"] == "book_appointment"
+    assert result["department"] == "내과"
+    assert result["customer_type"] == "초진"
+    assert result["patient_name"] == "김영희"
+    assert result["patient_contact"] == "010-1234-5678"
+    assert result["birth_date"] == "1955-05-05"
+    assert result["is_proxy_booking"] is True
+
+
+@patch("src.classifier.ollama.chat")
+def test_classify_intent_maps_symptom_to_department_without_diagnosis(mock_ollama_chat):
+    mock_ollama_chat.return_value = _mock_ollama_payload(
+        {
+            "action": "book_appointment",
+            "department": "이비인후과",
+            "doctor_name": None,
+            "date": "2026-03-25",
+            "time": "10:00",
+            "customer_type": None,
+            "is_first_visit": None,
+            "patient_name": None,
+            "patient_contact": None,
+            "birth_date": None,
+            "is_proxy_booking": False,
+            "symptom_keywords": ["코막힘"],
+            "missing_info": [],
+            "target_appointment_hint": None,
+        }
+    )
+
+    result = classify_intent("코막힘이 심해서 내일 오전 10시에 예약하고 싶어요", now=REFERENCE_NOW)
+
+    assert result["action"] == "clarify"
+    assert result["department"] == "이비인후과"
+    assert "코막힘" in result["symptom_keywords"]
+    assert result["missing_info"] == ["customer_type"]
+    assert "감기" not in json.dumps(result, ensure_ascii=False)
+
+
+@patch("src.classifier.ollama.chat", side_effect=ConnectionRefusedError("connection refused"))
+def test_classify_intent_connection_refused_returns_safe_clarify(mock_ollama_chat):
+    result = classify_intent("예약 도와주세요", now=REFERENCE_NOW)
+
+    assert result["action"] == "clarify"
+    assert result["error"] is True
+    assert result["fallback_action"] == "clarify"
+    assert "일시적 오류" in result["fallback_message"]
+    mock_ollama_chat.assert_called_once()
+

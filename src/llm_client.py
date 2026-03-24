@@ -8,6 +8,34 @@ MODEL_NAME = "qwen3-coder:30b"
 TEMPORARY_ERROR_MESSAGE = "일시적 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 
 
+def build_classification_fallback(action: str = "clarify") -> dict:
+    return {
+        "action": action,
+        "department": None,
+        "doctor_name": None,
+        "date": None,
+        "time": None,
+        "customer_type": None,
+        "is_first_visit": None,
+        "patient_name": None,
+        "patient_contact": None,
+        "birth_date": None,
+        "is_proxy_booking": False,
+        "is_emergency": False,
+        "symptom_keywords": [],
+        "missing_info": [],
+        "target_appointment_hint": None,
+    }
+
+
+def build_safety_fallback() -> dict:
+    return {
+        "is_medical": False,
+        "is_off_topic": False,
+        "is_emergency": False,
+    }
+
+
 def _strip_code_fences(raw_content: str) -> str:
     content = str(raw_content).strip()
     if content.startswith("```"):
@@ -31,17 +59,23 @@ def safe_parse_json(raw_content: str) -> dict | None:
 
 
 def _default_fallback_action(error_code: str) -> str:
-    if error_code in {"ollama_connection_refused", "ollama_timeout", "json_parse_failed"}:
+    if error_code in {
+        "ollama_connection_refused",
+        "ollama_timeout",
+        "json_parse_failed",
+        "ollama_response_invalid",
+    }:
         return "clarify"
     return "reject"
 
 
-def _build_error_payload(error_code: str, **extra) -> dict:
-    payload = {
+def _build_error_payload(error_code: str, fallback_payload: dict | None = None, **extra) -> dict:
+    payload = dict(fallback_payload or {})
+    payload.update({
         "_error": error_code,
         "_fallback_action": _default_fallback_action(error_code),
         "_fallback_message": TEMPORARY_ERROR_MESSAGE,
-    }
+    })
     payload.update(extra)
     return payload
 
@@ -61,7 +95,12 @@ def _normalize_exception_code(exc: Exception) -> str:
     return "ollama_call_failed"
 
 
-def chat_json(messages: list[dict], chat_fn=None, max_parse_retries: int = 1) -> dict:
+def chat_json(
+    messages: list[dict],
+    chat_fn=None,
+    max_parse_retries: int = 1,
+    fallback_payload: dict | None = None,
+) -> dict:
     """Call Ollama with format='json' and return parsed JSON or a safe fallback payload."""
     if chat_fn is None:
         chat_fn = ollama.chat
@@ -77,6 +116,7 @@ def chat_json(messages: list[dict], chat_fn=None, max_parse_retries: int = 1) ->
         except Exception as exc:
             return _build_error_payload(
                 _normalize_exception_code(exc),
+                fallback_payload=fallback_payload,
                 _message=str(exc),
             )
 
@@ -85,6 +125,7 @@ def chat_json(messages: list[dict], chat_fn=None, max_parse_retries: int = 1) ->
         except (TypeError, KeyError):
             return _build_error_payload(
                 "ollama_response_invalid",
+                fallback_payload=fallback_payload,
                 _raw=response,
             )
 
@@ -96,12 +137,14 @@ def chat_json(messages: list[dict], chat_fn=None, max_parse_retries: int = 1) ->
                 continue
             return _build_error_payload(
                 "json_parse_failed",
+                fallback_payload=fallback_payload,
                 _raw=raw_content,
                 _retries=parse_attempt,
             )
         except TypeError:
             return _build_error_payload(
                 "json_parse_failed",
+                fallback_payload=fallback_payload,
                 _raw=raw_content,
                 _retries=parse_attempt,
             )
@@ -109,6 +152,7 @@ def chat_json(messages: list[dict], chat_fn=None, max_parse_retries: int = 1) ->
         if parsed is None:
             return _build_error_payload(
                 "ollama_response_invalid",
+                fallback_payload=fallback_payload,
                 _raw=raw_content,
             )
 

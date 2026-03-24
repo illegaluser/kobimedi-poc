@@ -3,17 +3,17 @@
   "last_updated": "2026-03-25",
   "description": "코비메디 예약 Agent PoC — 기능 정의 및 구현 체크리스트",
   "groups": {
-    "safety":           "안전 게이트 및 하드 제약 (최우선)",
-    "classification":   "의도 분류 및 액션 선택",
-    "extraction":       "정보 추출 (날짜/시간/분과/환자정보)",
+    "safety": "안전 게이트 및 하드 제약 (최우선)",
+    "classification": "의도 분류 및 액션 선택",
+    "extraction": "정보 추출 (날짜/시간/분과/환자정보)",
     "patient_identity": "환자 식별 및 초진/재진 판정",
-    "dialogue":         "멀티턴 대화 상태머신",
-    "policy":           "예약 정책 결정론 검사 (LLM 위임 금지)",
-    "storage":          "저장소 진실원천 관리",
-    "calcom":           "Q4 cal.com 연동 (선택)",
-    "output":           "출력 계약 및 형식",
-    "metrics":          "KPI/제약 지표 계측",
-    "docs":             "문서 산출물"
+    "dialogue": "멀티턴 대화 상태머신",
+    "policy": "예약 정책 결정론 검사 (LLM 위임 금지)",
+    "storage": "저장소 진실원천 관리",
+    "calcom": "Q4 cal.com 연동 (선택)",
+    "output": "출력 계약 및 형식",
+    "metrics": "KPI/제약 지표 계측",
+    "docs": "문서 산출물"
   },
   "features": [
     {
@@ -134,7 +134,8 @@
       "policy_ref": "policy_digest §2.2, AGENTS.md rule 2",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_classifier.py"
+      "test_ref": "tests/test_classifier.py",
+      "passes": true
     },
     {
       "id": "F-012",
@@ -144,7 +145,8 @@
       "policy_ref": "policy_digest §2.2",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_classifier.py"
+      "test_ref": "tests/test_classifier.py",
+      "passes": true
     },
     {
       "id": "F-013",
@@ -154,7 +156,8 @@
       "policy_ref": "policy_digest §12.1, AGENTS.md rule 9",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_batch.py"
+      "test_ref": "tests/test_batch.py",
+      "passes": true
     },
     {
       "id": "F-014",
@@ -163,7 +166,8 @@
       "description": "classified_intent는 해석된 의도 라벨, action은 시스템이 실제 취한 최종 동작. 둘이 다를 수 있음(예: 의도는 book이지만 action은 clarify).",
       "policy_ref": "policy_digest §12.1",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-021",
@@ -173,7 +177,8 @@
       "policy_ref": "policy_digest §6.1",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_classifier.py"
+      "test_ref": "tests/test_classifier.py",
+      "passes": true
     },
     {
       "id": "F-022",
@@ -182,7 +187,8 @@
       "description": "이비인후과/내과/정형외과 또는 담당 의사명 기반 분과 추출.",
       "policy_ref": "policy_digest §6.1",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-023",
@@ -191,7 +197,8 @@
       "description": "메시지 또는 context에서 환자 본인/대리 예약 대상 이름 추출. ticket.customer_name은 힌트로만 사용.",
       "policy_ref": "policy_digest §6.1, §0.2",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-024",
@@ -200,7 +207,8 @@
       "description": "메시지에서 전화번호 패턴(010-xxxx-xxxx 등) 추출. 추출 실패 시 clarify 단계에서 별도 수집.",
       "policy_ref": "policy_digest §5.6, §6.1, §6.4",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-025",
@@ -209,7 +217,8 @@
       "description": "동명이인 해소용 생년월일 추출. 전화번호 미확보 또는 충돌 시에만 요청.",
       "policy_ref": "policy_digest §6.1, §6.4",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-026",
@@ -218,7 +227,8 @@
       "description": "메시지에서 '엄마를 대신해서', '아버지 예약', '가족 대신' 등 명시적 대리 표현 감지. 감지 즉시 proxy_booking=true로 전환.",
       "policy_ref": "policy_digest §6.3",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-027",
@@ -227,7 +237,8 @@
       "description": "is_emergency 플래그 추출. 급성, 지금 너무 아파, 응급 등 키워드 기반.",
       "policy_ref": "policy_digest §4.2",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-028",
@@ -236,7 +247,8 @@
       "description": "변경/취소/확인 요청 시 기존 예약 식별 힌트(날짜, 분과, 예약번호) 추출.",
       "policy_ref": "policy_digest §6.1, §9",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-029",
@@ -245,7 +257,8 @@
       "description": "증상 기반 분과 매핑 테이블을 이용한 안내. 진단·질병명 확정 금지.",
       "policy_ref": "policy_digest §8.5",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-030",
@@ -254,7 +267,8 @@
       "description": "ticket.customer_type은 추출 힌트로만 사용. 초진/재진 최종 판정은 저장소에서.",
       "policy_ref": "policy_digest §0.2, §7.2",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-031",

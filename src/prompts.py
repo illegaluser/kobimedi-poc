@@ -77,6 +77,12 @@ Return this schema:
   "time": "14:00",
   "customer_type": "재진",
   "is_first_visit": false,
+  "patient_name": "김민수",
+  "patient_contact": "010-1234-5678",
+  "birth_date": "1990-02-02",
+  "is_proxy_booking": false,
+  "is_emergency": false,
+  "symptom_keywords": ["콧물", "코막힘"],
   "missing_info": [],
   "target_appointment_hint": {
     "appointment_id": null,
@@ -94,9 +100,10 @@ Rules:
    - 이춘영 원장 -> 이비인후과
    - 김만수 원장 -> 내과
    - 원징수 원장 -> 정형외과
-3. Symptom-based department guidance is allowed, but never output diagnosis names or medical judgement.
+3. Symptom-based department guidance is allowed only as booking guidance, never as diagnosis or medical judgement.
    - Good: 콧물 -> 이비인후과
    - Bad: 감기입니다 / 비염입니다 / 약을 드세요
+   - If symptoms imply a department, recommend a department only. Never assert a disease.
 4. booking intent must use book_appointment, modify intent must use modify_appointment,
    cancellation must use cancel_appointment, appointment lookup must use check_appointment.
 5. customer_type must be one of: 초진, 재진, or null.
@@ -104,16 +111,20 @@ Rules:
 7. For modify_appointment, extract the NEW date/time into date and time.
    Put the EXISTING appointment identification into target_appointment_hint.
 8. For cancel_appointment and check_appointment, use target_appointment_hint for the appointment being referenced.
+9. Detect proxy booking signals such as "엄마 대신", "아버지를 위해", "가족 대신", "대신해서" and set is_proxy_booking accordingly.
+10. Extract patient_name, patient_contact, and birth_date only if explicitly present or strongly inferable from the message.
+11. symptom_keywords should include only user-mentioned symptoms useful for department guidance. Do not invent symptoms.
+12. If the message is ambiguous or required information is missing, prefer clarify rather than guessing.
 9. If required information is missing for the inferred task, put only these field names in missing_info:
    department, date, time, customer_type, appointment_target
-10. Required fields by action:
+13. Required fields by action:
    - book_appointment: department, date, time, customer_type
    - modify_appointment: appointment_target, date, time
    - cancel_appointment: appointment_target
    - check_appointment: appointment_target
-11. If missing_info is non-empty, set action to clarify.
-12. If the user only asks which department fits symptoms, return department if inferable and action=clarify.
-13. Do not invent unavailable facts, diagnoses, prescriptions, or treatment advice.
+14. If missing_info is non-empty, set action to clarify.
+15. If the user only asks which department fits symptoms, return department if inferable and action=clarify.
+16. Do not invent unavailable facts, diagnoses, prescriptions, or treatment advice.
 """.strip()
 
 
