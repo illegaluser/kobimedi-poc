@@ -133,6 +133,12 @@ TIME_HINT_PATTERNS = [
     r"자정",
 ]
 
+CONVERSATION_CONTINUATION_PATTERNS = [
+    r"^(네|예|넵|넹|맞아요|좋아요|진행해 주세요|진행해주세요|예약해 주세요|예약해주세요)$",
+    r"^(아니오|아니요|아뇨|취소할게요|취소할게)$",
+    r"^\d+번(이요|이에요|으로|로)?$",
+]
+
 WEEKDAY_MAP = {
     "월": 0,
     "화": 1,
@@ -351,6 +357,43 @@ def _has_temporal_hint(text: str) -> bool:
     return _contains_any(text, DATE_HINT_PATTERNS) or _contains_any(text, TIME_HINT_PATTERNS)
 
 
+def _is_conversation_continuation(text: str) -> bool:
+    return any(re.fullmatch(pattern, text) for pattern in CONVERSATION_CONTINUATION_PATTERNS)
+
+
+def _split_message_segments(text: str) -> list[str]:
+    segments = re.split(r"(?:[?!。.!]+|\s*(?:그리고|그리고요|근데|그런데|그럼|또)\s*)", text)
+    return [segment.strip(" ,") for segment in segments if segment and segment.strip(" ,")]
+
+
+def _is_safe_booking_segment(segment: str) -> bool:
+    has_booking_signal = (
+        _is_booking_related(segment)
+        or _has_temporal_hint(segment)
+        or _extract_requested_department(segment) in SUPPORTED_DEPARTMENTS
+        or _extract_doctor_name(segment) in SUPPORTED_DOCTORS
+    )
+    if not has_booking_signal:
+        return False
+
+    if _contains_any(segment, MEDICAL_ADVICE_PATTERNS):
+        return False
+    if _contains_any(segment, INJECTION_PATTERNS) or _contains_any(segment, OFF_TOPIC_PATTERNS):
+        return False
+    return True
+
+
+def _extract_safe_booking_subrequest(text: str) -> str | None:
+    safe_segments: list[str] = []
+    for segment in _split_message_segments(text):
+        if _is_safe_booking_segment(segment) and segment not in safe_segments:
+            safe_segments.append(segment)
+
+    if not safe_segments:
+        return None
+    return " ".join(safe_segments)
+
+
 def _infer_action_from_text(text: str) -> str:
     if any(keyword in text for keyword in ["취소", "예약 취소"]):
         return "cancel_appointment"
@@ -466,6 +509,8 @@ def safety_check(user_message: str) -> dict:
         "is_off_topic": False,
         "is_emergency": False,
         "mixed_department_guidance": False,
+        "contains_booking_subrequest": False,
+        "safe_booking_text": None,
         "department_hint": department_hint,
         "unsupported_department": None,
         "unsupported_doctor": None,
@@ -508,6 +553,13 @@ def safety_check(user_message: str) -> dict:
         })
         return result
 
+    if _is_conversation_continuation(text):
+        result.update({
+            "category": "safe",
+            "reason": "후속 확인 또는 선택 응답으로 판단",
+        })
+        return result
+
     if _is_department_guidance_request(text):
         result.update({
             "category": "safe",
@@ -517,6 +569,17 @@ def safety_check(user_message: str) -> dict:
         return result
 
     if _contains_any(text, MEDICAL_ADVICE_PATTERNS):
+        safe_booking_text = _extract_safe_booking_subrequest(text)
+        if safe_booking_text:
+            result.update({
+                "category": "safe",
+                "contains_booking_subrequest": True,
+                "safe_booking_text": safe_booking_text,
+                "department_hint": _infer_department_from_text(safe_booking_text) or department_hint,
+                "reason": "의료 상담 요청이 포함됐지만 예약 가능한 하위 요청을 분리함",
+            })
+            return result
+
         result.update({
             "category": "medical_advice",
             "is_medical": True,

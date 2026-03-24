@@ -66,8 +66,7 @@ def test_unknown_department_is_not_hallucinated():
         result = process_ticket(ticket, all_appointments=[], existing_appointment=None)
 
     assert result["action"] == "reject"
-    assert "피부과" in result["response"]
-    assert "없습니다" in result["response"]
+    assert "해당 분과는 코비메디에서 지원하지 않습니다" in result["response"]
     mock_classify_intent.assert_not_called()
     mock_apply_policy.assert_not_called()
 
@@ -81,10 +80,61 @@ def test_unknown_doctor_is_not_hallucinated():
         result = process_ticket(ticket, all_appointments=[], existing_appointment=None)
 
     assert result["action"] == "reject"
-    assert "박OO 원장" in result["response"]
-    assert "확인되지" in result["response"]
+    assert "해당 의사는 코비메디에서 지원하지 않습니다" in result["response"]
     mock_classify_intent.assert_not_called()
     mock_apply_policy.assert_not_called()
+
+
+def test_mixed_medical_and_booking_request_rejects_medical_part_and_continues_booking_flow():
+    ticket = {
+        "customer_name": "김민수",
+        "customer_type": "재진",
+        "message": "이 약 먹어도 되나요? 그리고 내일 내과 예약하고 싶어요",
+        "booking_time": "2026-04-11T16:00:00Z",
+    }
+
+    with patch("src.agent.classify_intent") as mock_classify_intent, patch("src.agent.apply_policy") as mock_apply_policy:
+        mock_classify_intent.return_value = {
+            "action": "clarify",
+            "department": "내과",
+            "date": "2026-04-12",
+            "time": None,
+            "missing_info": ["time"],
+        }
+        result = process_ticket(ticket, all_appointments=[], existing_appointment=None)
+
+    assert result["action"] == "clarify"
+    assert result["department"] == "내과"
+    assert "의료 상담" in result["response"]
+    assert "몇 시를 원하시나요" in result["response"]
+    mock_classify_intent.assert_called_once_with("내일 내과 예약하고 싶어요")
+    mock_apply_policy.assert_not_called()
+
+
+def test_mixed_medical_and_booking_request_rejects_when_not_safely_separable():
+    ticket = {
+        "message": "내일 예약하면서 이 약 먹어도 되는지도 같이 알려주세요",
+        "booking_time": "2026-04-11T16:00:00Z",
+    }
+
+    with patch("src.agent.classify_intent") as mock_classify_intent, patch(
+        "src.agent.apply_policy"
+    ) as mock_apply_policy:
+        result = process_ticket(ticket, all_appointments=[], existing_appointment=None)
+
+    assert result["action"] == "reject"
+    assert "의료법상 의료 상담" in result["response"]
+    mock_classify_intent.assert_not_called()
+    mock_apply_policy.assert_not_called()
+
+
+def test_safety_check_marks_separable_mixed_request_with_booking_subrequest():
+    result = safety_check("이 약 먹어도 되나요? 그리고 내일 내과 예약하고 싶어요")
+
+    assert result["category"] == "safe"
+    assert result["contains_booking_subrequest"] is True
+    assert result["safe_booking_text"] == "내일 내과 예약하고 싶어요"
+    assert result["department_hint"] == "내과"
 
 
 @patch("src.classifier.ollama.chat")

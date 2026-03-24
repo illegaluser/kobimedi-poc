@@ -339,6 +339,15 @@ def _build_response_and_record(session_state: dict | None, **kwargs) -> dict:
     customer_type = kwargs.pop("customer_type", None)
 
     result = build_response(**kwargs)
+    if (
+        safety_result
+        and safety_result.get("contains_booking_subrequest")
+        and result.get("action") in {"book_appointment", "modify_appointment", "cancel_appointment", "check_appointment", "clarify"}
+    ):
+        result["response"] = (
+            "의료 상담(진단, 약물, 치료 방법 안내)은 도와드릴 수 없습니다. "
+            + result.get("response", "")
+        )
     result.update(
         _build_runtime_fields(
             ticket=ticket,
@@ -474,7 +483,7 @@ def _build_unknown_entity_response(
         return _build_response_and_record(
             session_state,
             action="reject",
-            message=f"코비메디에는 {unsupported_department}가 없습니다. 현재 예약 가능한 분과는 이비인후과, 내과, 정형외과입니다.",
+            message=f"해당 분과는 코비메디에서 지원하지 않습니다. 현재 예약 가능한 분과는 이비인후과, 내과, 정형외과입니다.",
             ticket=ticket,
             safety_result=safety_result,
             customer_type=customer_type,
@@ -484,7 +493,7 @@ def _build_unknown_entity_response(
         return _build_response_and_record(
             session_state,
             action="reject",
-            message=f"{unsupported_doctor}은(는) 코비메디에서 확인되지 않습니다. 현재 확인 가능한 의료진은 이춘영 원장, 김만수 원장, 원징수 원장입니다.",
+            message=f"해당 의사는 코비메디에서 지원하지 않습니다. 현재 확인 가능한 의료진은 이춘영 원장, 김만수 원장, 원징수 원장입니다.",
             ticket=ticket,
             safety_result=safety_result,
             customer_type=customer_type,
@@ -533,6 +542,8 @@ def _normalize_safety_result(safety_output) -> dict:
         "category": category,
         "department_hint": None,
         "mixed_department_guidance": False,
+        "contains_booking_subrequest": False,
+        "safe_booking_text": None,
         "unsupported_department": None,
         "unsupported_doctor": None,
     }
@@ -738,8 +749,6 @@ def process_ticket(
         if pending_confirmation_result is not None:
             return pending_confirmation_result
 
-    selected_existing_appointment = None
-    action_override = None
     if state is not None and state.get("pending_candidates"):
         pending_action = state.get("pending_action") or "check_appointment"
         selected_existing_appointment = _resolve_candidate_selection(user_message, state["pending_candidates"], now)
@@ -757,6 +766,9 @@ def process_ticket(
         action_override = pending_action
         state["pending_candidates"] = None
         state["accumulated_slots"] = _extract_candidate_slots(selected_existing_appointment, now)
+    else:
+        selected_existing_appointment = None
+        action_override = None
 
     if selected_existing_appointment is None:
         safety_result = _normalize_safety_result(classify_safety(user_message))
@@ -786,8 +798,12 @@ def process_ticket(
                 safety_result=safety_result,
                 customer_type=customer_type,
             )
+    else:
+        safety_result = {"category": "safe", "department_hint": None}
 
-        intent_result = _classify_intent_with_optional_now(user_message, now)
+    if selected_existing_appointment is None:
+        classification_message = safety_result.get("safe_booking_text") or user_message
+        intent_result = _classify_intent_with_optional_now(classification_message, now)
         if intent_result.get("error"):
             fallback_action = intent_result.get("fallback_action")
             fallback_message = intent_result.get("fallback_message")
@@ -802,7 +818,6 @@ def process_ticket(
                 customer_type=customer_type,
             )
     else:
-        safety_result = {"category": "safe", "department_hint": None}
         slots = _extract_candidate_slots(selected_existing_appointment, now)
         intent_result = {
             "action": action_override,
