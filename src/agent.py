@@ -86,7 +86,7 @@ def _determine_classified_intent(
         if category == "emergency":
             return "escalate"
         if category == "classification_error":
-            return "reject"
+            return result_action if result_action in VALID_ACTIONS else "clarify"
 
     return result_action if result_action in VALID_ACTIONS else "clarify"
 
@@ -393,6 +393,8 @@ def _build_safety_response(
     customer_type: str | None = None,
 ) -> dict:
     category = safety_result.get("category")
+    fallback_action = safety_result.get("fallback_action")
+    fallback_message = safety_result.get("fallback_message")
 
     if category == "emergency":
         return _build_response_and_record(
@@ -419,6 +421,16 @@ def _build_safety_response(
             session_state,
             action="reject",
             message="코비메디 예약 관련 문의만 도와드릴 수 있습니다.",
+            ticket=ticket,
+            safety_result=safety_result,
+            customer_type=customer_type,
+        )
+
+    if category == "classification_error" and fallback_action == "clarify":
+        return _build_response_and_record(
+            session_state,
+            action="clarify",
+            message=fallback_message or "일시적 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
             ticket=ticket,
             safety_result=safety_result,
             customer_type=customer_type,
@@ -763,12 +775,14 @@ def process_ticket(
 
         intent_result = _classify_intent_with_optional_now(user_message, now)
         if intent_result.get("error"):
+            fallback_action = intent_result.get("fallback_action")
+            fallback_message = intent_result.get("fallback_message")
             return _build_response_and_record(
                 state,
-                action="clarify",
-                message="의도를 파악하는 중 오류가 발생했습니다. 다시 시도해 주세요.",
+                action=fallback_action if fallback_action in VALID_ACTIONS else "clarify",
+                message=fallback_message or "의도를 파악하는 중 오류가 발생했습니다. 다시 시도해 주세요.",
                 ticket=ticket,
-                classified_intent="clarify",
+                classified_intent=fallback_action if fallback_action in VALID_ACTIONS else "clarify",
                 safety_result=safety_result,
                 intent_result=intent_result,
                 customer_type=customer_type,

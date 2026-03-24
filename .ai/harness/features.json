@@ -172,7 +172,7 @@
     "category": "evaluation",
     "description": "golden_eval로 일반화 점검이 가능하다",
     "acceptance": "gold_cases.json 비교 결과 출력",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-026",

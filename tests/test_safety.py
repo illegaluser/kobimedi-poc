@@ -106,3 +106,19 @@ def test_safety_check_falls_back_safely_on_ollama_failure(_mock_ollama_chat):
 
     assert result["action"] == "reject"
     assert "안전성 판단" in result["response"]
+
+
+@patch("src.classifier.ollama.chat", side_effect=ConnectionRefusedError("connection refused"))
+def test_safety_check_connection_refused_returns_safe_clarify(_mock_ollama_chat):
+    result = process_ticket({"message": "애매한 문장입니다", "booking_time": "2026-04-11T16:00:00Z"})
+
+    assert result["action"] == "clarify"
+    assert "일시적 오류" in result["response"]
+
+
+@patch("src.classifier.ollama.chat", side_effect=TimeoutError("timed out"))
+def test_safety_check_timeout_returns_safe_clarify(_mock_ollama_chat):
+    result = process_ticket({"message": "애매한 문장입니다", "booking_time": "2026-04-11T16:00:00Z"})
+
+    assert result["action"] == "clarify"
+    assert "일시적 오류" in result["response"]

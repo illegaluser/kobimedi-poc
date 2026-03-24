@@ -426,6 +426,8 @@ def _call_safety_llm(user_message: str) -> dict:
     )
     return {
         "_error": result.get("_error"),
+        "_fallback_action": result.get("_fallback_action"),
+        "_fallback_message": result.get("_fallback_message"),
         "is_medical": bool(result.get("is_medical", False)),
         "is_off_topic": bool(result.get("is_off_topic", False)),
         "is_emergency": bool(result.get("is_emergency", False)),
@@ -506,6 +508,8 @@ def safety_check(user_message: str) -> dict:
             result.update({
                 "category": "classification_error",
                 "reason": "안전성 판별 실패",
+                "fallback_action": llm_result.get("_fallback_action", "clarify"),
+                "fallback_message": llm_result.get("_fallback_message"),
             })
         elif llm_result["is_emergency"]:
             result.update({
@@ -530,6 +534,7 @@ def safety_check(user_message: str) -> dict:
         result.update({
             "category": "classification_error",
             "reason": "안전성 판별 실패",
+            "fallback_action": "clarify",
         })
 
     return result
@@ -561,10 +566,15 @@ def _classify_intent(user_message: str, now: datetime | None = None) -> dict:
 
     llm_result: dict = {}
     llm_error = False
+    llm_fallback_action = "clarify"
+    llm_fallback_message = None
     try:
         llm_result = _call_intent_llm(normalized_message, reference_now)
         if not isinstance(llm_result, dict) or llm_result.get("_error"):
             llm_error = True
+            if isinstance(llm_result, dict):
+                llm_fallback_action = llm_result.get("_fallback_action", "clarify")
+                llm_fallback_message = llm_result.get("_fallback_message")
             llm_result = {}
     except (json.JSONDecodeError, KeyError, TypeError, Exception):
         llm_error = True
@@ -608,5 +618,8 @@ def _classify_intent(user_message: str, now: datetime | None = None) -> dict:
 
     if llm_error and action == "clarify" and not department and not date and not time:
         result["error"] = True
+        result["fallback_action"] = llm_fallback_action
+        if llm_fallback_message:
+            result["fallback_message"] = llm_fallback_message
 
     return result

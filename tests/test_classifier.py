@@ -222,6 +222,31 @@ def test_classify_intent_json_decode_error_returns_safe_clarify(mock_ollama_chat
     assert result["error"] is True
 
 
+@patch("src.classifier.ollama.chat")
+def test_classify_intent_json_decode_error_retries_once(mock_ollama_chat):
+    mock_ollama_chat.side_effect = [
+        {"message": {"content": "this is not json"}},
+        _mock_ollama_payload(
+            {
+                "action": "book_appointment",
+                "department": "내과",
+                "date": "2026-03-25",
+                "time": "14:00",
+                "is_first_visit": False,
+                "missing_info": [],
+            }
+        ),
+    ]
+
+    result = classify_intent("내일 오후 2시 내과 예약", now=REFERENCE_NOW)
+
+    assert result["action"] == "book_appointment"
+    assert result["department"] == "내과"
+    assert result["date"] == "2026-03-25"
+    assert result["time"] == "14:00"
+    assert mock_ollama_chat.call_count == 2
+
+
 @patch("src.classifier.ollama.chat", side_effect=Exception("Ollama connection failed"))
 def test_classify_intent_ollama_failure_returns_safe_clarify(mock_ollama_chat):
     result = classify_intent("아무 말", now=REFERENCE_NOW)
@@ -230,6 +255,21 @@ def test_classify_intent_ollama_failure_returns_safe_clarify(mock_ollama_chat):
     assert result["department"] is None
     assert result["missing_info"] == []
     assert result["error"] is True
+    assert result["fallback_action"] == "clarify"
+    assert "일시적 오류" in result["fallback_message"]
+    mock_ollama_chat.assert_called_once()
+
+
+@patch("src.classifier.ollama.chat", side_effect=TimeoutError("timed out"))
+def test_classify_intent_timeout_returns_safe_clarify(mock_ollama_chat):
+    result = classify_intent("아무 말", now=REFERENCE_NOW)
+
+    assert result["action"] == "clarify"
+    assert result["department"] is None
+    assert result["missing_info"] == []
+    assert result["error"] is True
+    assert result["fallback_action"] == "clarify"
+    assert "일시적 오류" in result["fallback_message"]
     mock_ollama_chat.assert_called_once()
 
 
