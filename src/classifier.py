@@ -39,7 +39,7 @@ DEPARTMENT_KEYWORDS = {
 }
 
 SYMPTOM_DEPARTMENT_KEYWORDS = {
-    "이비인후과": ["콧물", "코막힘", "목아픔", "목이 아", "인후", "귀가", "기침", "가래", "비염"],
+    "이비인후과": ["콧물", "코막힘", "목아픔", "목이 아", "인후", "귀가", "기침", "가래", "비염", "삼킬", "따가워"],
     "내과": ["속이", "복통", "소화", "발열", "열이", "두통", "어지러", "감기"],
     "정형외과": ["허리", "무릎", "어깨", "발목", "손목", "관절", "등이 아", "삐", "근육"],
 }
@@ -71,6 +71,20 @@ OFF_TOPIC_PATTERNS = [
     r"농담",
     r"재밌는 이야기",
     r"대통령",
+    r"심심",
+    r"대화할래",
+    r"잡담",
+]
+
+COMPLAINT_ESCALATION_PATTERNS = [
+    r"책임자 연결",
+    r"상담원 연결",
+    r"화가 나",
+    r"세 번째 전화",
+    r"다른 병원 가",
+    r"도대체 병원이 왜",
+    r"왜 이렇게 어려운",
+    r"매번 이러면",
 ]
 
 MEDICAL_ADVICE_PATTERNS = [
@@ -95,6 +109,7 @@ DEPARTMENT_GUIDANCE_PATTERNS = [
     r"진료과",
     r"어디로 가야",
     r"어디로 가면",
+    r"어디서 봐",
 ]
 
 DATE_HINT_PATTERNS = [
@@ -478,6 +493,13 @@ def safety_check(user_message: str) -> dict:
         })
         return result
 
+    if _contains_any(text, COMPLAINT_ESCALATION_PATTERNS):
+        result.update({
+            "category": "complaint",
+            "reason": "강한 불만 또는 상담원 연결 요청 감지",
+        })
+        return result
+
     if _contains_any(text, INJECTION_PATTERNS) or _contains_any(text, OFF_TOPIC_PATTERNS):
         result.update({
             "category": "off_topic",
@@ -499,6 +521,13 @@ def safety_check(user_message: str) -> dict:
             "category": "medical_advice",
             "is_medical": True,
             "reason": "진단/약물/치료 관련 의료 상담 요청 감지",
+        })
+        return result
+
+    if _is_booking_related(text) or _has_temporal_hint(text) or requested_department or doctor_name:
+        result.update({
+            "category": "safe",
+            "reason": "예약/조회/변경/취소 관련 요청으로 판단",
         })
         return result
 

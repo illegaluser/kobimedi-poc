@@ -122,3 +122,55 @@ def test_safety_check_timeout_returns_safe_clarify(_mock_ollama_chat):
 
     assert result["action"] == "clarify"
     assert "일시적 오류" in result["response"]
+
+
+@pytest.mark.parametrize(
+    "user_message",
+    [
+        "3월 18일 화요일 오전 10시에 내과 진료 예약 부탁드립니다.",
+        "내과 진료 보고 싶은데요, 3월 21일 금요일 오후 4시 가능한가요?",
+        "이비인후과 3월 19일 수요일 오전 9시에 진료 예약 원합니다.",
+        "처음 방문인데요, 내과 3월 19일 오후 4시에 예약 가능할까요?",
+        "저희 어머니 대신 예약하려고요. 내과 3월 20일 오전 10시에 부탁드립니다.",
+    ],
+)
+def test_booking_related_visit_phrases_are_not_blocked_as_medical_advice(user_message):
+    result = safety_check(user_message)
+
+    assert result["category"] == "safe"
+    assert result["is_medical"] is False
+
+
+@pytest.mark.parametrize(
+    "user_message, expected_department",
+    [
+        ("목이 너무 아프고 삼킬 때마다 따가워요. 진료 보고 싶은데 3월 19일 오전 10시에 가능한가요?", "이비인후과"),
+        ("요즘 소화가 안 되고 속이 더부룩해요. 3월 20일 오후 2시에 진료 받을 수 있나요?", "내과"),
+        ("무릎이 아파서 진료 보려고요. 3월 21일 오전 11시로 잡아주세요.", "정형외과"),
+    ],
+)
+def test_symptom_based_booking_requests_stay_safe_for_booking_flow(user_message, expected_department):
+    result = safety_check(user_message)
+
+    assert result["category"] == "safe"
+    assert result["department_hint"] == expected_department
+
+
+def test_complaint_request_is_escalated_not_rejected():
+    result = process_ticket(
+        {
+            "message": "이게 세 번째 전화인데요. 예약 변경이 왜 이렇게 어려운 거예요? 전에 통화한 사람은 된다고 했는데 지금은 안 된다니요. 책임자 연결해 주세요.",
+            "booking_time": "2026-04-11T16:00:00Z",
+        },
+        all_appointments=[],
+        existing_appointment=None,
+    )
+
+    assert result["action"] == "escalate"
+    assert "연결" in result["response"]
+
+
+def test_department_guidance_phrase_is_not_rejected_as_medical_advice():
+    result = safety_check("두통이 심하고 목도 뻣뻣해요. 어디서 봐야 할지 모르겠어요.")
+
+    assert result["category"] == "safe"

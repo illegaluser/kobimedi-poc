@@ -83,6 +83,8 @@ def _determine_classified_intent(
             return "reject"
         if category == "off_topic":
             return "reject"
+        if category == "complaint":
+            return "escalate"
         if category == "emergency":
             return "escalate"
         if category == "classification_error":
@@ -165,6 +167,8 @@ def _build_reasoning(
             parts.append("의료 상담 요청 감지")
         elif category == "off_topic":
             parts.append("예약 외 요청 또는 프롬프트 인젝션 감지")
+        elif category == "complaint":
+            parts.append("강한 불만 또는 상담원 연결 필요 요청 감지")
         elif category == "emergency":
             parts.append("급성 통증 또는 응급 표현 감지")
         elif category == "classification_error":
@@ -421,6 +425,16 @@ def _build_safety_response(
             session_state,
             action="reject",
             message="코비메디 예약 관련 문의만 도와드릴 수 있습니다.",
+            ticket=ticket,
+            safety_result=safety_result,
+            customer_type=customer_type,
+        )
+
+    if category == "complaint":
+        return _build_response_and_record(
+            session_state,
+            action="escalate",
+            message="불편을 드려 죄송합니다. 해당 요청은 상담원이 이어서 도와드릴 수 있도록 연결해 드리겠습니다.",
             ticket=ticket,
             safety_result=safety_result,
             customer_type=customer_type,

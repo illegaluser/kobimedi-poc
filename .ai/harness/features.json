@@ -121,9 +121,9 @@
   {
     "id": "F-018",
     "category": "policy",
-    "description": "기존 예약 유무와 대상 식별에 따라 modify/cancel/check 정합성을 검증한다",
-    "acceptance": "예약 없음 또는 대상 불명확 + modify/cancel/check -> clarify 또는 정책 응답",
-    "passes": true
+    "description": "modify/cancel/check는 실제 예약 저장소의 상태를 진실원천으로 검증한다",
+    "acceptance": "ticket.context 보조정보와 별도로 영속 저장된 예약 기록(JSON/DB) 기준으로 대상 예약 존재 여부를 판정한다",
+    "passes": false
   },
   {
     "id": "F-019",
@@ -243,5 +243,47 @@
     "description": "Q4 외부 준비사항과 Event Type 생성 체크리스트가 문서에 반영된다",
     "acceptance": "cal.com 가입/API 키/Event Type 3개 생성/스크린샷 확보 절차가 architecture 또는 report에 명시된다",
     "passes": false
+  },
+  {
+    "id": "F-036",
+    "category": "storage",
+    "description": "신규 예약이 영속 JSON 저장소에 실제로 기록된다",
+    "acceptance": "예약 확정 후 파일 기반 예약 저장소에 새 예약 레코드가 추가되고, 다음 요청에서 조회 가능하다",
+    "passes": false
+  },
+  {
+    "id": "F-037",
+    "category": "storage",
+    "description": "예약 변경/취소가 영속 JSON 저장소에 반영된다",
+    "acceptance": "modify/cancel 처리 후 파일 저장소가 갱신되고, 이후 check_appointment에서 최신 상태가 반영된다",
+    "passes": false
+  },
+  {
+    "id": "F-038",
+    "category": "runtime",
+    "description": "chat.py와 run.py가 동일한 파일 기반 저장소 계층을 공유한다",
+    "acceptance": "두 모드 모두 공통 storage 모듈을 통해 같은 예약 기록 파일을 읽고 쓴다",
+    "passes": false
+  },
+  {
+    "id": "F-039",
+    "category": "reliability",
+    "description": "파일 저장소 갱신 실패 시 거짓 성공 없이 안전하게 복구한다",
+    "acceptance": "쓰기 실패/파일 손상/동시 갱신 오류 시 예약 성공을 거짓으로 알리지 않고 reject 또는 clarify로 복구한다",
+    "passes": false
+  },
+  {
+    "id": "F-040",
+    "category": "runtime",
+    "description": "시간 의존 핵심 로직은 now 파라미터를 받아 테스트 가능해야 한다",
+    "acceptance": "agent.py 핵심 함수가 now 파라미터를 받고 freezegun 등으로 고정 시각 테스트가 가능하다",
+    "passes": true
+  },
+  {
+    "id": "F-041",
+    "category": "evaluation",
+    "description": "gold_cases.json은 tickets.json 원본 구조를 유지한 채 gold label을 추가한다",
+    "acceptance": "ticket 원문(message/context 등)을 보존하면서 expected_action/expected_department를 함께 포함하고, 각 label에 사람 검증 필요 note가 명시된다",
+    "passes": true
   }
 ]
