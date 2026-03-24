@@ -130,14 +130,14 @@
     "category": "policy",
     "description": "당일 신규 예약은 일반/응급 케이스를 구분해 보수적으로 처리한다",
     "acceptance": "일반 당일 신규 예약은 자동 확정하지 않고 재확인/대체 시간 안내, 응급은 escalate",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-020",
     "category": "policy",
     "description": "슬롯 불가 시 대체 시간 또는 대체 처리 방안을 안내한다",
     "acceptance": "정원 초과/겹침 시 다른 가능 시간대 제안 또는 불가 사유 설명",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-021",
