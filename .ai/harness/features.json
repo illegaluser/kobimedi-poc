@@ -4,21 +4,21 @@
     "category": "safety",
     "description": "의료 상담 요청을 reject로 차단한다",
     "acceptance": "진단/약물/치료 조언 요청 -> action=reject",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-002",
     "category": "safety",
     "description": "목적 외 사용(잡담/인젝션)을 reject로 차단한다",
     "acceptance": "잡담/날씨/프롬프트 인젝션 -> action=reject",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-003",
     "category": "safety",
     "description": "급성 통증/응급을 escalate로 처리한다",
     "acceptance": "응급성 표현 -> action=escalate",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-004",
@@ -32,49 +32,49 @@
     "category": "safety",
     "description": "확인되지 않은 분과/의사/정책/가용시간을 지어내지 않는다",
     "acceptance": "피부과/존재하지 않는 원장/확인 안 된 운영정보 -> 모른다고 안내하거나 처리 불가 응답",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-006",
     "category": "classification",
     "description": "7개 action을 과제 원문 값으로 정확히 분류한다",
     "acceptance": "book_appointment/modify_appointment/cancel_appointment/check_appointment/clarify/escalate/reject",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-007",
     "category": "classification",
     "description": "분과를 올바르게 추정한다",
     "acceptance": "이비인후과/내과/정형외과 추정 또는 미지정",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-008",
     "category": "classification",
     "description": "증상 기반 분과 안내를 제공하되 의료 진단은 하지 않는다",
     "acceptance": "콧물→이비인후과 안내, 진단명/처방/치료 조언은 거부",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-009",
     "category": "classification",
     "description": "담당 의사명 요청을 분과/의사 매핑으로 해석한다",
     "acceptance": "이춘영 원장님→이비인후과, 김만수 원장님→내과, 원징수 원장님→정형외과",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-010",
     "category": "extraction",
     "description": "자유문장에서 예약 처리에 필요한 핵심 슬롯 정보를 추출한다",
     "acceptance": "날짜/시간/분과/고객유형/의사명/기존 예약 대상이 있으면 구조화하여 활용",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-011",
     "category": "classification",
     "description": "정보 부족 시 clarify를 반환한다",
     "acceptance": "날짜/시간/분과/환자유형/대상 예약 식별 정보 누락 -> action=clarify",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-012",
@@ -102,28 +102,28 @@
     "category": "policy",
     "description": "1시간당 최대 3명 제한을 적용한다",
     "acceptance": "초과 시 대체 시간 또는 불가 응답",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-016",
     "category": "policy",
     "description": "당일 변경/취소 금지 (24시간 규칙)",
     "acceptance": "24시간 미만 -> 불가 응답",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-017",
     "category": "policy",
     "description": "초진 40분, 재진 30분 슬롯을 적용한다",
     "acceptance": "customer_type=초진 -> 40분, 재진 -> 30분",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-018",
     "category": "policy",
     "description": "기존 예약 유무와 대상 식별에 따라 modify/cancel/check 정합성을 검증한다",
     "acceptance": "예약 없음 또는 대상 불명확 + modify/cancel/check -> clarify 또는 정책 응답",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-019",
@@ -179,7 +179,7 @@
     "category": "reliability",
     "description": "Ollama 호출 실패/비정상 JSON에도 안전한 폴백을 제공한다",
     "acceptance": "timeout/연결오류/잘못된 JSON -> unsafe 허용 없이 reject 또는 clarify로 안전하게 복구",
-    "passes": false
+    "passes": true
   },
   {
     "id": "F-027",

@@ -2,6 +2,12 @@
 from datetime import datetime, timedelta, timezone
 
 # --- Constants ---
+DOCTOR_DEPARTMENT_MAP = {
+    "이춘영 원장": "이비인후과",
+    "김만수 원장": "내과",
+    "원징수 원장": "정형외과",
+}
+
 POLICY_REASONS = {
     "SLOT_UNAVAILABLE": "요청하신 시간에는 예약이 이미 가득 찼습니다. 다른 시간을 선택해 주세요.",
     "SLOT_FULL_CAPACITY": "해당 시간대에는 예약 인원이 가득 찼습니다. 다른 시간대를 선택해 주세요.",

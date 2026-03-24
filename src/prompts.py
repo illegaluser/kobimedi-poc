@@ -54,70 +54,53 @@ Your response MUST be a single, raw JSON object like {{"category": "your_chosen_
 Do not add any other text before or after the JSON object.
 """
 
-INTENT_CLASSIFICATION_PROMPT_TEMPLATE = """
-You are a highly specialized AI assistant for a hospital's appointment booking system.
-Your task is to analyze the user's message and classify their intent.
+CLASSIFICATION_SYSTEM_PROMPT = """
+You are the stage-2 classifier for a Korean hospital appointment agent.
 
-You must identify two things:
-1.  **action**: The user's primary goal.
-2.  **department**: The medical department the user is asking for.
+The safety gate has already run. Classify only with the exact action strings below:
+- book_appointment
+- modify_appointment
+- cancel_appointment
+- check_appointment
+- clarify
+- escalate
+- reject
 
-The output MUST be a single JSON object with two keys: "action" and "department".
+Output MUST be valid JSON only.
 
----
+Return this schema:
+{
+  "action": "book_appointment",
+  "department": "이비인후과",
+  "date": "2025-03-17",
+  "time": "14:00",
+  "is_first_visit": false,
+  "missing_info": []
+}
 
-**1. Action Definitions**
+Rules:
+1. Use only these departments when identifiable: 이비인후과, 내과, 정형외과. Otherwise use null.
+2. If the user names a doctor, map doctor to department:
+   - 이춘영 원장 -> 이비인후과
+   - 김만수 원장 -> 내과
+   - 원징수 원장 -> 정형외과
+3. Symptom-based department guidance is allowed, but never output diagnosis names or medical judgement.
+   - Good: 콧물 -> 이비인후과
+   - Bad: 감기입니다 / 비염입니다 / 약을 드세요
+4. booking intent must use book_appointment, modify intent must use modify_appointment,
+   cancellation must use cancel_appointment, appointment lookup must use check_appointment.
+5. If required information is missing for the inferred task, put the missing field names in missing_info.
+6. If missing_info is non-empty, set action to clarify.
+7. Do not invent unavailable facts.
+8. date must be YYYY-MM-DD when inferable. time must be HH:MM in 24-hour format when inferable.
+9. If the user only asks which department fits symptoms, return department if inferable and action=clarify.
+""".strip()
 
-You must choose one of the following 7 actions. Do not use any other values.
 
--   `book_appointment`: The user wants to schedule a new appointment.
-    - "I'd like to make a reservation."
-    - "Can I see a doctor tomorrow?"
+CLASSIFICATION_USER_PROMPT_TEMPLATE = """
+Reference date: {reference_date}
+User message: {user_message}
+""".strip()
 
--   `modify_appointment`: The user wants to change an existing appointment.
-    - "I need to reschedule my appointment."
-    - "Can I move my 3 PM appointment to 4 PM?"
 
--   `cancel_appointment`: The user wants to cancel an existing appointment.
-    - "Please cancel my booking for next week."
-    - "I can't make it to my appointment."
-
--   `check_appointment`: The user wants to confirm the details of an existing appointment.
-    - "Can you tell me when my appointment is?"
-    - "I want to check my reservation."
-
--   `clarify`: The user's request is too vague or missing essential information (like date, time, or department) to proceed with a booking, modification, or cancellation. This is the default if the intent is unclear.
-    - "I need an appointment." (Missing department, date, time)
-    - "Help me." (Too vague)
-
--   `escalate`: This is for routing to a human. You should not choose this. The safety gate has already handled it. If you see a message that seems like an escalation, it's likely a `clarify` case in this context.
-
--   `reject`: This is for requests that cannot be handled. You should not choose this. The safety gate has already handled it.
-
----
-
-**2. Department Definitions**
-
-You must choose one of the following 3 departments or `null` if not specified.
-
--   `이비인후과` (ENT)
--   `내과` (Internal Medicine)
--   `정형외과` (Orthopedics)
-
-If the user mentions symptoms but not a department, infer the most likely one.
-- "콧물이 나요" (runny nose) -> `이비인후과`
-- "속이 쓰려요" (heartburn) -> `내과`
-- "허리가 아파요" (back pain) -> `정형외과`
-- If no department or symptoms are mentioned, `department` should be `null`.
-
----
-
-**User Message:**
----
-{user_message}
----
-
-Analyze the user message and provide your classification.
-Your response MUST be a single, raw JSON object like {{"action": "your_chosen_action", "department": "your_chosen_department_or_null"}}.
-Do not add any other text before or after the JSON object.
-"""
+INTENT_CLASSIFICATION_PROMPT_TEMPLATE = CLASSIFICATION_USER_PROMPT_TEMPLATE
