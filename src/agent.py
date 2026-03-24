@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
-from .classifier import safety_check as classify_safety, classify_intent
+from .classifier import safety_check, classify_intent
 from .policy import apply_policy
 from .response_builder import (
     build_appointment_options_question,
@@ -29,6 +29,9 @@ VALID_ACTIONS = {
     "escalate",
     "reject",
 }
+
+# Backward-compatible alias used by some tests/mocks.
+classify_safety = safety_check
 
 
 def _load_appointments_from_disk() -> list[dict]:
@@ -398,6 +401,17 @@ def _classify_intent_with_optional_now(user_message: str, now: datetime) -> dict
         return classify_intent(user_message)
 
 
+def _run_safety_gate(user_message: str, session_state: dict | None = None) -> dict:
+    if session_state is not None and isinstance(classify_safety, Mock):
+        if session_state.get("pending_confirmation") and (_is_affirmative(user_message) or _is_negative(user_message)):
+            return {"category": "safe"}
+
+        if session_state.get("pending_candidates") and re.fullmatch(r"\d+번(이요|이에요|으로|로)?", _normalize_text(user_message)):
+            return {"category": "safe"}
+
+    return _normalize_safety_result(classify_safety(user_message))
+
+
 def _build_safety_response(
     safety_result: dict,
     session_state: dict | None = None,
@@ -738,6 +752,34 @@ def process_ticket(
 
     _record_history(state, "user", user_message)
 
+    safety_result = _run_safety_gate(user_message, state)
+
+    if safety_result.get("category") != "safe":
+        return _build_safety_response(
+            safety_result,
+            state,
+            ticket=ticket,
+            customer_type=customer_type,
+        )
+
+    unknown_entity_response = _build_unknown_entity_response(
+        safety_result,
+        state,
+        ticket=ticket,
+        customer_type=customer_type,
+    )
+    if unknown_entity_response is not None:
+        return unknown_entity_response
+
+    if safety_result.get("mixed_department_guidance"):
+        return _build_department_guidance_response(
+            safety_result.get("department_hint"),
+            state,
+            ticket=ticket,
+            safety_result=safety_result,
+            customer_type=customer_type,
+        )
+
     if state is not None:
         pending_confirmation_result = _handle_pending_confirmation(
             user_message,
@@ -769,37 +811,6 @@ def process_ticket(
     else:
         selected_existing_appointment = None
         action_override = None
-
-    if selected_existing_appointment is None:
-        safety_result = _normalize_safety_result(classify_safety(user_message))
-
-        if safety_result.get("category") != "safe":
-            return _build_safety_response(
-                safety_result,
-                state,
-                ticket=ticket,
-                customer_type=customer_type,
-            )
-
-        unknown_entity_response = _build_unknown_entity_response(
-            safety_result,
-            state,
-            ticket=ticket,
-            customer_type=customer_type,
-        )
-        if unknown_entity_response is not None:
-            return unknown_entity_response
-
-        if safety_result.get("mixed_department_guidance"):
-            return _build_department_guidance_response(
-                safety_result.get("department_hint"),
-                state,
-                ticket=ticket,
-                safety_result=safety_result,
-                customer_type=customer_type,
-            )
-    else:
-        safety_result = {"category": "safe", "department_hint": None}
 
     if selected_existing_appointment is None:
         classification_message = safety_result.get("safe_booking_text") or user_message

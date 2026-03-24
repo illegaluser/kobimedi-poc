@@ -514,6 +514,8 @@ def safety_check(user_message: str) -> dict:
         "department_hint": department_hint,
         "unsupported_department": None,
         "unsupported_doctor": None,
+        "fallback_action": None,
+        "fallback_message": None,
         "reason": "예약 관련 일반 문의",
     }
 

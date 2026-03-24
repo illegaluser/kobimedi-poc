@@ -38,6 +38,46 @@ def test_empty_message_rejected():
     assert process_ticket({"message": ""})["action"] == "reject"
 
 
+def test_safety_check_runs_before_pending_confirmation_flow():
+    session_state = {
+        "conversation_history": [],
+        "accumulated_slots": {"date": "2026-04-12", "time": "14:00", "department": "내과"},
+        "pending_confirmation": {
+            "action": "book_appointment",
+            "appointment": {
+                "customer_name": "김민수",
+                "department": "내과",
+                "date": "2026-04-12",
+                "time": "14:00",
+                "booking_time": "2026-04-12T14:00:00+09:00",
+                "customer_type": "재진",
+            },
+        },
+        "pending_action": "book_appointment",
+        "pending_missing_info": [],
+        "pending_candidates": None,
+    }
+
+    with patch("src.agent.classify_intent") as mock_classify_intent, patch(
+        "src.agent.apply_policy"
+    ) as mock_apply_policy:
+        result = process_ticket(
+            {
+                "customer_name": "김민수",
+                "customer_type": "재진",
+                "message": "이 약 먹어도 되나요?",
+            },
+            all_appointments=[],
+            existing_appointment=None,
+            session_state=session_state,
+        )
+
+    assert result["action"] == "reject"
+    assert "의료법상 의료 상담" in result["response"]
+    mock_classify_intent.assert_not_called()
+    mock_apply_policy.assert_not_called()
+
+
 def test_mixed_department_guidance_allows_booking_guidance_without_medical_advice():
     ticket = {
         "message": "예약하려는데, 콧물이 계속 나요. 어느 과가 맞나요?",
