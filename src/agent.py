@@ -549,11 +549,11 @@ def _infer_requested_action(message: str) -> str | None:
     return None
 
 
-def _classify_intent_with_optional_now(user_message: str, now: datetime) -> dict:
+def _classify_intent_with_optional_now(user_message: str, now: datetime, conversation_history: list[dict] | None = None) -> dict:
     if isinstance(classify_intent, Mock):
         return classify_intent(user_message)
     try:
-        return classify_intent(user_message, now=now)
+        return classify_intent(user_message, now=now, conversation_history=conversation_history)
     except TypeError:
         return classify_intent(user_message)
 
@@ -633,14 +633,18 @@ def _run_safety_gate(user_message: str, session_state: dict | None = None) -> di
         pending_missing_info = _get_pending_missing_info(session_state)
         if "is_proxy_booking" in pending_missing_info and _parse_proxy_answer(user_message) is not None:
             return {"category": "safe"}
-        if "patient_name" in pending_missing_info and _extract_patient_name(user_message):
-            return {"category": "safe"}
-        if "patient_contact" in pending_missing_info and _extract_patient_contact(user_message):
-            return {"category": "safe"}
-        if "customer_name" in pending_missing_info and _extract_patient_name(user_message):
-            return {"category": "safe"}
-        if "birth_date" in pending_missing_info and _extract_birth_date(user_message):
-            return {"category": "safe"}
+
+        # 대화 진행 중 정보 수집 단계: 먼저 안전 검사를 수행하고,
+        # 위험하지 않은 경우에만 fast-path 적용
+        if pending_missing_info and any(
+            f in pending_missing_info
+            for f in ["patient_name", "patient_contact", "customer_name", "birth_date", "department", "date", "time"]
+        ):
+            full_check = _normalize_safety_result(classify_safety(user_message))
+            if full_check.get("category") == "safe":
+                return {"category": "safe"}
+            # 안전 위반이면 fast-path 무시하고 full_check 결과 반환
+            return full_check
 
     return _normalize_safety_result(classify_safety(user_message))
 
@@ -832,6 +836,32 @@ def _merge_accumulated_slots(session_state: dict | None, intent_result: dict) ->
     if session_state is not None:
         session_state["accumulated_slots"] = merged.copy()
     return merged
+
+
+def _sync_queue_with_accumulated_slots(session_state: dict | None, merged_slots: dict) -> None:
+    """D-001 fix: pending_missing_info_queue에서 이미 채워진 슬롯 항목을 제거한다.
+
+    classify_intent가 department/date/time을 추출해 accumulated_slots에 반영했음에도
+    pending_missing_info_queue가 해당 항목을 여전히 포함하는 경우를 방지한다.
+    _determine_dialogue_missing_info가 최종 판정 기준이지만, 큐를 미리 동기화하여
+    LLM 결과의 edge case로 인한 불일치를 방어적으로 차단한다.
+    """
+    if session_state is None:
+        return
+    queue = list(session_state.get("pending_missing_info_queue") or [])
+    if not queue:
+        return
+    new_queue = [
+        item for item in queue
+        if not (
+            (item == "department" and merged_slots.get("department"))
+            or (item == "date" and merged_slots.get("date"))
+            or (item == "time" and merged_slots.get("time"))
+        )
+    ]
+    if len(new_queue) != len(queue):
+        session_state["pending_missing_info_queue"] = new_queue
+        session_state["pending_missing_info"] = new_queue.copy()
 
 
 def _get_effective_customer_name(ticket: dict | None, session_state: dict | None) -> str | None:
@@ -1154,15 +1184,7 @@ def _consume_pending_identity_input(
             _reset_pending_flow_for_new_action(session_state, inferred_switch)
             return None, None
 
-    identity_missing = any(
-        field in pending_missing_info
-        for field in ["is_proxy_booking", "patient_name", "patient_contact", "customer_name", "birth_date"]
-    )
-    if not identity_missing:
-        return None, None
-
-    consumed_identity = False
-
+    # ── is_proxy_booking: 패턴 매칭으로 확정 처리 (LLM 불필요) ──
     if "is_proxy_booking" in pending_missing_info and _get_effective_proxy_booking(ticket, session_state) is None:
         parsed_proxy = _parse_proxy_answer(user_message)
         if parsed_proxy is None:
@@ -1201,103 +1223,17 @@ def _consume_pending_identity_input(
             if inferred_name:
                 session_state["patient_name"] = inferred_name
                 ticket["patient_name"] = inferred_name
-                pending_missing_info = [item for item in pending_missing_info if item != "patient_name"]
         pending_missing_info = [item for item in pending_missing_info if item != "is_proxy_booking"]
-        consumed_identity = True
-
-    if "patient_name" in pending_missing_info and not _get_effective_patient_name(ticket, session_state):
-        patient_name = _extract_patient_name(user_message)
-        if patient_name:
-            session_state["patient_name"] = patient_name
-            ticket["patient_name"] = patient_name
-            if session_state.get("is_proxy_booking") is False:
-                session_state.setdefault("customer_name", patient_name)
-                ticket.setdefault("customer_name", patient_name)
+        if not session_state.get("patient_name") and parsed_proxy is False:
             pending_missing_info = [item for item in pending_missing_info if item != "patient_name"]
-            consumed_identity = True
-
-    if "patient_contact" in pending_missing_info and not _get_effective_patient_contact(ticket, session_state):
-        patient_contact = _extract_patient_contact(user_message)
-        if patient_contact:
-            session_state["patient_contact"] = patient_contact
-            ticket["patient_contact"] = patient_contact
-            pending_missing_info = [item for item in pending_missing_info if item != "patient_contact"]
-            consumed_identity = True
-
-    if "customer_name" in pending_missing_info and not _get_effective_customer_name(ticket, session_state):
-        patient_name = _extract_patient_name(user_message)
-        if patient_name:
-            session_state["customer_name"] = patient_name
-            ticket["customer_name"] = patient_name
-            pending_missing_info = [item for item in pending_missing_info if item != "customer_name"]
-            consumed_identity = True
-
-    if "birth_date" in pending_missing_info and not _get_effective_birth_date(ticket, session_state):
-        parsed_birth_date = _extract_birth_date(user_message)
-        if parsed_birth_date:
-            session_state["birth_date"] = parsed_birth_date
-            ticket["birth_date"] = parsed_birth_date
-            pending_missing_info = [item for item in pending_missing_info if item != "birth_date"]
-            consumed_identity = True
-
-    session_state["pending_missing_info_queue"] = list(pending_missing_info)
-    session_state["pending_missing_info"] = list(pending_missing_info)
-
-    # Bug fix (F-042): Reset the clarify turn count as soon as any identity field
-    # is successfully consumed — regardless of whether more fields still remain.
-    # Previously the reset only happened inside `if pending_missing_info:`, which
-    # meant consuming the LAST identity field (emptying the queue) never triggered
-    # a reset, causing the main flow to increment the counter an extra time.
-    if consumed_identity:
+        session_state["pending_missing_info_queue"] = list(pending_missing_info)
+        session_state["pending_missing_info"] = list(pending_missing_info)
         _reset_clarify_turn_count(session_state)
+        # proxy 처리 후, 나머지 필드는 classify_intent(대화 이력 포함)에서 추출
+        return None, None
 
-    if pending_missing_info:
-        if _should_escalate_for_clarify_limit(session_state, pending_missing_info):
-            record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
-            return (
-                _build_response_and_record(
-                    session_state,
-                    action="escalate",
-                    message="필수 정보를 여러 차례 확인했지만 부족하여 상담원이 이어서 도와드리겠습니다.",
-                    ticket=ticket,
-                    classified_intent="escalate",
-                    intent_result={"action": "escalate", "missing_info": pending_missing_info},
-                    customer_type=None,
-                ),
-                None,
-            )
-        record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
-        
-        if not consumed_identity:
-            _increment_clarify_turn_count(session_state)
-            
-        return (
-            _build_response_and_record(
-                session_state,
-                action="clarify",
-                message=build_missing_info_question(pending_missing_info, action_context=session_state.get("pending_action")),
-                ticket=ticket,
-                classified_intent="clarify",
-                intent_result={"action": "clarify", "missing_info": pending_missing_info},
-                customer_type=None,
-            ),
-            None,
-        )
-
-    if consumed_identity:
-        slots = session_state.get("accumulated_slots", {})
-        return None, {
-            "action": session_state.get("pending_action") or "book_appointment",
-            "department": slots.get("department"),
-            "date": slots.get("date"),
-            "time": slots.get("time"),
-            "patient_name": session_state.get("patient_name"),
-            "patient_contact": session_state.get("patient_contact"),
-            "birth_date": session_state.get("birth_date"),
-            "is_proxy_booking": session_state.get("is_proxy_booking"),
-            "missing_info": [],
-        }
-
+    # ── 나머지 identity/booking 필드: classify_intent에 위임 (대화 이력 전체 활용) ──
+    # regex 기반 개별 추출 대신, LLM이 전체 대화에서 한번에 추출하도록 위임
     return None, None
 
 
@@ -1501,6 +1437,9 @@ def _handle_pending_confirmation(
 
     if _is_negative(user_message):
         session_state["pending_confirmation"] = None
+        # D-010 fix: 확인 거부는 유효한 대화 진전(사용자가 날짜/시간 변경을 원함)이므로
+        # clarify_turn_count를 리셋하여 이후 턴에서 불필요한 escalate를 방지한다.
+        _reset_clarify_turn_count(session_state)
         record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
         return _build_response_and_record(
             session_state,
@@ -1662,7 +1601,8 @@ def process_ticket(
         intent_result = forced_intent_result
     elif selected_existing_appointment is None:
         classification_message = safety_result.get("safe_booking_text") or user_message
-        intent_result = _classify_intent_with_optional_now(classification_message, now)
+        chat_history = (state or {}).get("conversation_history") if is_chat else None
+        intent_result = _classify_intent_with_optional_now(classification_message, now, conversation_history=chat_history)
         if intent_result.get("error"):
             fallback_action = intent_result.get("fallback_action")
             fallback_message = intent_result.get("fallback_message")
@@ -1686,6 +1626,10 @@ def process_ticket(
             "time": slots.get("time"),
             "missing_info": [],
         }
+
+    # 배치 모드: ticket 메타데이터(context.preferred_*, customer_type)로 intent 보완
+    if not is_chat:
+        intent_result = _merge_ticket_context_into_intent(ticket, intent_result)
 
     _sync_identity_state_from_intent(ticket, state, intent_result, is_chat=is_chat)
 
@@ -1718,6 +1662,8 @@ def process_ticket(
         _reset_pending_flow_for_new_action(state, action)
 
     merged_slots = _merge_accumulated_slots(state, intent_result)
+    # D-001 fix: accumulated_slots에 반영된 슬롯을 pending_missing_info_queue에서 즉시 제거
+    _sync_queue_with_accumulated_slots(state, merged_slots)
     department = merged_slots.get("department") or intent_result.get("department") or safety_result.get("department_hint")
     classified_intent = intent_result.get("action")
 
@@ -1902,7 +1848,8 @@ def process_ticket(
                 customer_type=customer_type,
             )
         if alternatives:
-            message = f"{message} 가능한 다른 시간은 {', '.join(alternatives)} 입니다."
+            alt_strs = [str(a) if isinstance(a, str) else a.strftime("%m/%d %H:%M") for a in alternatives]
+            message = f"{message} 가능한 다른 시간은 {', '.join(alt_strs)} 입니다."
 
         event = KpiEvent.AGENT_SOFT_FAIL_CLARIFY if recommended_action == "clarify" else KpiEvent.AGENT_HARD_FAIL
         record_kpi_event(event)
@@ -1933,23 +1880,41 @@ def process_ticket(
             "booking_time": booking_time,
             "customer_type": customer_type,
         }
-        if state is not None:
-            state["pending_confirmation"] = {"action": "book_appointment", "appointment": appointment}
-        _set_pending_missing_info(state, [])
-        message = build_confirmation_question(appointment, now)
-        record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
-        return _build_response_and_record(
-            state,
-            action="clarify",
-            message=message,
-            department=department,
-            ticket=ticket,
-            classified_intent=classified_intent,
-            safety_result=safety_result,
-            intent_result=intent_result,
-            policy_result={"allowed": True},
-            customer_type=customer_type,
-        )
+        if is_chat:
+            # 채팅 모드: 확인 질문 후 사용자 응답 대기
+            if state is not None:
+                state["pending_confirmation"] = {"action": "book_appointment", "appointment": appointment}
+            _set_pending_missing_info(state, [])
+            message = build_confirmation_question(appointment, now)
+            record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
+            return _build_response_and_record(
+                state,
+                action="clarify",
+                message=message,
+                department=department,
+                ticket=ticket,
+                classified_intent=classified_intent,
+                safety_result=safety_result,
+                intent_result=intent_result,
+                policy_result={"allowed": True},
+                customer_type=customer_type,
+            )
+        else:
+            # 배치 모드: 확인 없이 즉시 예약 결정
+            message = build_confirmation_question(appointment, now)
+            record_kpi_event(KpiEvent.AGENT_SUCCESS)
+            return _build_response_and_record(
+                state,
+                action="book_appointment",
+                message=message,
+                department=department,
+                ticket=ticket,
+                classified_intent="book_appointment",
+                safety_result=safety_result,
+                intent_result=intent_result,
+                policy_result={"allowed": True},
+                customer_type=customer_type,
+            )
 
     success_reference = target_existing_appointment or {
         "department": department,

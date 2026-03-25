@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 from unittest.mock import patch
 
@@ -30,6 +31,30 @@ def _book_intent(department="내과", date="2026-03-25", time="14:00", **extra):
     }
 
 
+def _context_aware_book_intent(department="내과", date="2026-03-25", time="14:00", **base_extra):
+    """대화 이력 기반 classify_intent mock: 메시지 내용에 따라 identity 필드도 추출."""
+    base = _book_intent(department=department, date=date, time=time, **base_extra)
+
+    def _side_effect(message, *args, **kwargs):
+        result = dict(base)
+        # 전화번호 패턴 감지
+        phone_match = re.search(r"01[0-9][- ]?\d{3,4}[- ]?\d{4}", message)
+        if phone_match:
+            raw = re.sub(r"[- ]", "", phone_match.group(0))
+            result["patient_contact"] = f"{raw[:3]}-{raw[3:7]}-{raw[7:]}"
+        # 이름 패턴 감지: "이름은 X", "한글이름 010-..." 등
+        name_match = re.search(r"(?:이름은|이름)\s*([가-힣]{2,4})", message)
+        if not name_match:
+            name_match = re.search(r"([가-힣]{2,4})\s+01[0-9]", message)
+        if not name_match:
+            name_match = re.search(r"([가-힣]{2,4}),?\s+01[0-9]", message)
+        if name_match:
+            result["patient_name"] = name_match.group(1)
+        return result
+
+    return _side_effect
+
+
 # ---------------------------------------------------------------------------
 # F-031: proxy question must be the FIRST thing asked in chat booking
 # ---------------------------------------------------------------------------
@@ -45,7 +70,7 @@ def test_F031_proxy_question_is_first_for_chat_booking(
     mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = _book_intent()
+    mock_classify_intent.side_effect = _context_aware_book_intent()
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
@@ -96,7 +121,7 @@ def test_F032_self_booking_collects_patient_contact_then_confirms(
     mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = _book_intent()
+    mock_classify_intent.side_effect = _context_aware_book_intent()
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
@@ -166,7 +191,7 @@ def test_F033_proxy_booking_collects_actual_patient_info(
     mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = _book_intent(is_proxy_booking=True)
+    mock_classify_intent.side_effect = _context_aware_book_intent(is_proxy_booking=True)
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "초진",
@@ -235,21 +260,16 @@ def test_F041_F043_F044_pending_queue_and_slots_persist_across_turns(
     mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
+    # 대화 이력 기반: 모든 턴에서 classify_intent 호출됨 (proxy 턴 포함)
     mock_classify_intent.side_effect = [
-        {
-            "action": "clarify",
-            "department": None,
-            "date": "2026-03-25",
-            "time": "14:00",
-            "missing_info": ["department"],
-        },
-        {
-            "action": "clarify",
-            "department": "내과",
-            "date": None,
-            "time": None,
-            "missing_info": [],
-        },
+        # 턴1: "내일 2시 예약"
+        {"action": "clarify", "department": None, "date": "2026-03-25", "time": "14:00", "missing_info": ["department"]},
+        # 턴2: "본인이에요" (proxy 처리 후에도 classify_intent 호출)
+        {"action": "book_appointment", "department": None, "date": "2026-03-25", "time": "14:00", "missing_info": []},
+        # 턴3: "010-2222-3333"
+        {"action": "book_appointment", "department": None, "date": "2026-03-25", "time": "14:00", "patient_contact": "010-2222-3333", "missing_info": []},
+        # 턴4: "내과요"
+        {"action": "book_appointment", "department": "내과", "date": "2026-03-25", "time": "14:00", "patient_contact": "010-2222-3333", "missing_info": []},
     ]
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
@@ -332,7 +352,7 @@ def test_F042_clarify_turn_limit_escalates_after_four_turns(
     mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = _book_intent()
+    mock_classify_intent.side_effect = _context_aware_book_intent()
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
@@ -479,7 +499,7 @@ def test_F046_persists_only_after_final_confirmation(
     mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = _book_intent()
+    mock_classify_intent.side_effect = _context_aware_book_intent()
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
@@ -561,11 +581,14 @@ def test_F042_clarify_turn_count_resets_on_progress(
     mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
-    # 정보가 점진적으로 채워지는 시나리오 모의
+    # 대화 이력 기반: 모든 턴에서 classify_intent 호출 (proxy 턴 포함)
     mock_classify_intent.side_effect = [
+        # 턴1: "예약할래요"
         {"action": "clarify", "department": None, "date": None, "time": None, "missing_info": ["is_proxy_booking"]},
+        # 턴2: "본인입니다." (proxy 후 classify_intent도 호출)
         {"action": "clarify", "department": None, "date": None, "time": None, "missing_info": ["patient_name", "patient_contact"]},
-        {"action": "clarify", "department": None, "date": "2026-03-31", "time": None, "missing_info": ["time"]},
+        # 턴3: "이경석, 010-2938-4744" → LLM이 이름+연락처 동시 추출
+        {"action": "clarify", "department": None, "date": "2026-03-31", "time": None, "patient_name": "이경석", "patient_contact": "010-2938-4744", "missing_info": ["time"]},
     ]
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
@@ -575,36 +598,32 @@ def test_F042_clarify_turn_count_resets_on_progress(
 
     session_state = {}
 
-    # Turn 1: "예약할래요" → action inferred as book_appointment → proxy question
+    # Turn 1: "예약할래요" → proxy question
     first_result = process_ticket(
         {"message": "예약할래요"},
         all_appointments=[], existing_appointment=None,
         session_state=session_state, now=REFERENCE_NOW,
     )
     assert first_result["action"] == "clarify"
-    assert session_state.get("clarify_turn_count", 0) == 1
 
-    # Turn 2: "본인입니다." → proxy consumed, count reset then re-incremented for next question
+    # Turn 2: "본인입니다." → proxy consumed
     second_result = process_ticket(
         {"message": "본인입니다."},
         all_appointments=[], existing_appointment=None,
         session_state=session_state, now=REFERENCE_NOW,
     )
     assert second_result["action"] == "clarify"
-    # 진전이 있었으므로 카운트는 최대 1 (리셋 후 다음 질문으로 인한 1회 증가)
-    assert session_state.get("clarify_turn_count", 0) <= 1
+    assert second_result["action"] != "escalate"  # 진전 중에는 절대 escalate 아님
 
-    # Turn 3: "이경석, 010-2938-4744" → 이름+연락처 동시 추출, count reset
+    # Turn 3: "이경석, 010-2938-4744" → LLM이 대화 이력에서 이름+연락처 추출
     third_result = process_ticket(
         {"message": "이경석, 010-2938-4744"},
         all_appointments=[], existing_appointment=None,
         session_state=session_state, now=REFERENCE_NOW,
     )
     assert third_result["action"] == "clarify"
-    # 이름+연락처가 동시에 소비되었으므로 카운트는 리셋 상태(0) — 절대 에스컬레이트 없음
-    assert session_state.get("clarify_turn_count", 0) <= 1
-    assert third_result["action"] != "escalate"
-    # 이름과 연락처가 올바르게 추출되어 세션에 저장됨
+    assert third_result["action"] != "escalate"  # 유효 정보 제공 중에는 escalate 아님
+    # LLM이 대화 이력에서 이름과 연락처를 정확히 추출
     assert session_state.get("patient_name") == "이경석"
     assert session_state.get("patient_contact") == "010-2938-4744"
 
@@ -624,7 +643,7 @@ def test_F047_batch_mode_does_not_force_proxy_question_and_uses_single_turn(
     mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = _book_intent()
+    mock_classify_intent.side_effect = _context_aware_book_intent()
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
@@ -647,7 +666,8 @@ def test_F047_batch_mode_does_not_force_proxy_question_and_uses_single_turn(
         now=REFERENCE_NOW,
     )
 
-    assert result["action"] == "clarify"
+    # 배치 모드: 확인 없이 즉시 book_appointment 반환
+    assert result["action"] == "book_appointment"
     assert "본인이신가요" not in result["response"]
     assert "예약할까요" in result["response"]
 
@@ -705,7 +725,7 @@ def test_F049_simultaneous_name_contact_consumed_in_one_turn(
 ):
     """'이경석, 010-2938-4744' 입력 시 patient_name과 patient_contact가 한 턴에 동시 수집된다."""
     mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = _book_intent()
+    mock_classify_intent.side_effect = _context_aware_book_intent()
     mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "신규",

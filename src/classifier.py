@@ -799,7 +799,19 @@ def _determine_missing_info(
     return missing_info
 
 
-def _call_intent_llm(user_message: str, now: datetime) -> dict:
+def _format_conversation_context(conversation_history: list[dict] | None) -> str:
+    """대화 이력을 프롬프트용 텍스트로 포맷팅한다."""
+    if not conversation_history:
+        return ""
+    lines = []
+    for entry in conversation_history:
+        role = "사용자" if entry.get("role") == "user" else "시스템"
+        lines.append(f"{role}: {entry.get('content', '')}")
+    return "Conversation so far:\n" + "\n".join(lines)
+
+
+def _call_intent_llm(user_message: str, now: datetime, conversation_history: list[dict] | None = None) -> dict:
+    conversation_context = _format_conversation_context(conversation_history)
     messages = [
         {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
         {
@@ -807,6 +819,7 @@ def _call_intent_llm(user_message: str, now: datetime) -> dict:
             "content": CLASSIFICATION_USER_PROMPT_TEMPLATE.format(
                 reference_date=now.date().isoformat(),
                 reference_datetime=now.isoformat(),
+                conversation_context=conversation_context,
                 user_message=user_message,
             ),
         },
@@ -937,11 +950,11 @@ def classify_safety(user_message: str) -> str:
     return safety_check(user_message)["category"]
 
 
-def classify_intent(user_message: str, now: datetime | None = None) -> dict:
-    return _classify_intent(user_message, now=now)
+def classify_intent(user_message: str, now: datetime | None = None, conversation_history: list[dict] | None = None) -> dict:
+    return _classify_intent(user_message, now=now, conversation_history=conversation_history)
 
 
-def _classify_intent(user_message: str, now: datetime | None = None) -> dict:
+def _classify_intent(user_message: str, now: datetime | None = None, conversation_history: list[dict] | None = None) -> dict:
     normalized_message = _normalize_message(user_message)
     reference_now = _ensure_reference_now(now)
 
@@ -950,7 +963,7 @@ def _classify_intent(user_message: str, now: datetime | None = None) -> dict:
     llm_fallback_action = Action.CLARIFY.value
     llm_fallback_message = None
     try:
-        llm_result = _call_intent_llm(normalized_message, reference_now)
+        llm_result = _call_intent_llm(normalized_message, reference_now, conversation_history=conversation_history)
         if not isinstance(llm_result, dict) or llm_result.get("_error"):
             llm_error = True
             if isinstance(llm_result, dict):

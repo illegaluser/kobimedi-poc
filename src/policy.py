@@ -212,8 +212,10 @@ def suggest_alternative_slots(
     suggestions = []
 
     # Define clinic hours (e.g., 9 AM to 6 PM)
-    day_start = datetime.combine(_ensure_datetime(original_time).date(), time(9, 0))
-    day_end = datetime.combine(_ensure_datetime(original_time).date(), time(18, 0))
+    orig_dt = _ensure_datetime(original_time)
+    tz = orig_dt.tzinfo
+    day_start = datetime.combine(orig_dt.date(), time(9, 0), tzinfo=tz)
+    day_end = datetime.combine(orig_dt.date(), time(18, 0), tzinfo=tz)
 
     # Start checking from the next 30-minute interval after the original failed time
     orig = _ensure_datetime(original_time)
