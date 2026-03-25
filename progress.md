@@ -46,3 +46,26 @@
 ### Next Step
 - Ollama LLM 연결 후 E2E 통합 테스트 (test_classifier.py 네트워크 의존 케이스)
 - `tests/test_policy.py` Booking 모델 타입 오류(pre-existing) 별도 수정 검토
+
+---
+
+## Current Status (2026-03-25 유저플로우 사용성 개선)
+
+### 수정된 결함 — 액션별 발화 세분화 및 본인확인 정보 수집 개선
+
+| # | 항목 | 수정 내용 |
+|---|------|-----------|
+| 1 | `is_proxy_booking` 질문 | 예약 신규/변경/취소/확인 각 액션별로 서로 다른 문구 반환 |
+| 2 | `patient_name` + `patient_contact` 동시 누락 | 두 필드가 모두 없을 때 한 문장으로 성함+연락처 함께 요청 (액션별 문구) |
+| 3 | `patient_contact` 단독 누락 | 성함은 확보, 연락처만 없는 경우도 액션별 문구로 요청 |
+
+수정 위치: `src/response_builder.py` — `build_missing_info_question()`
+
+### 테스트 결과
+- `tests/test_response_builder.py` (신규) : **27 / 27 passed**
+- `tests/` 전체 (test_classifier.py 제외 pre-existing LLM 의존 실패) : **77 / 77 passed**
+- 회귀 없음
+
+### Next Step
+- Ollama LLM E2E 통합 테스트
+- test_classifier.py LLM 의존 케이스 별도 처리

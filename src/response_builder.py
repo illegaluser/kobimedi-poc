@@ -116,12 +116,46 @@ def build_missing_info_question(
     missing_fields = missing_fields or []
     primary = missing_fields[0] if missing_fields else None
 
+    action = action_context or ""
+
     if primary == "is_proxy_booking":
+        if action == "modify_appointment":
+            return "예약 변경을 요청하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 요청하시는 건가요?"
+        if action == "cancel_appointment":
+            return "예약 취소를 요청하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 요청하시는 건가요?"
+        if action == "check_appointment":
+            return "예약 확인을 요청하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 요청하시는 건가요?"
+        # book_appointment or default
         return "예약하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 예약하시는 건가요?"
+
     if primary == "patient_name":
+        has_contact_missing = "patient_contact" in missing_fields
+        if action == "modify_appointment":
+            if has_contact_missing:
+                return "예약 변경을 위해 환자분 성함과 연락처를 함께 알려주세요. (예: 홍길동 010-1234-5678)"
+            return "예약 변경을 위해 환자분 성함을 알려주세요."
+        if action == "cancel_appointment":
+            if has_contact_missing:
+                return "예약 취소를 위해 환자분 성함과 연락처를 함께 알려주세요. (예: 홍길동 010-1234-5678)"
+            return "예약 취소를 위해 환자분 성함을 알려주세요."
+        if action == "check_appointment":
+            if has_contact_missing:
+                return "예약 확인을 위해 환자분 성함과 연락처를 함께 알려주세요. (예: 홍길동 010-1234-5678)"
+            return "예약 확인을 위해 환자분 성함을 알려주세요."
+        # book_appointment or default
+        if has_contact_missing:
+            return "예약 진행을 위해 환자분 성함과 연락처를 함께 알려주세요. (예: 홍길동 010-1234-5678)"
         return "예약 진행을 위해 환자분 성함을 알려주세요."
+
     if primary == "patient_contact":
+        if action == "modify_appointment":
+            return "예약 변경을 위해 환자분 연락처를 알려주세요."
+        if action == "cancel_appointment":
+            return "예약 취소를 위해 환자분 연락처를 알려주세요."
+        if action == "check_appointment":
+            return "예약 확인을 위해 환자분 연락처를 알려주세요."
         return "예약 진행을 위해 환자분 연락처를 알려주세요."
+
     if primary == "slot_selection":
         return "안내드린 대체 예약 시간 중 원하시는 번호를 선택해주세요."
 
