@@ -460,6 +460,7 @@
       "policy_ref": "AGENTS.md rule 4, policy_digest §0.1",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_policy.py"
     },
     {
@@ -470,6 +471,7 @@
       "policy_ref": "policy_digest §3",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_policy.py"
     },
     {
@@ -480,6 +482,7 @@
       "policy_ref": "policy_digest §8.2",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_policy.py"
     },
     {
@@ -490,6 +493,7 @@
       "policy_ref": "policy_digest §8.3",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_policy.py"
     },
     {
@@ -500,6 +504,7 @@
       "policy_ref": "policy_digest §9.1, §8.4, §13",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_policy.py"
     },
     {
@@ -509,7 +514,8 @@
       "description": "예약 불가 시 같은 날 다른 시간 또는 다음 가용일 후보 1-3개 제시. 단순 거절 금지.",
       "policy_ref": "policy_digest §8.6",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-057",
@@ -518,7 +524,8 @@
       "description": "급성/응급이 아닌 당일 신규 예약은 정상 정책(운영시간/정원)으로 처리 가능.",
       "policy_ref": "policy_digest §8.4",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-061",
