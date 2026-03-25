@@ -422,6 +422,7 @@ def _extract_customer_type_from_text(text: str) -> str | None:
 
 
 def _extract_patient_name_from_text(text: str) -> str | None:
+    clean_text = re.sub(PHONE_PATTERN, "", text)
     patterns = [
         r"(?:환자 이름은|환자명은|이름은|성함은)\s*([가-힣A-Za-z]{2,20})",
         r"([가-힣A-Za-z]{2,20})\s*(?:환자)\b",
@@ -432,6 +433,12 @@ def _extract_patient_name_from_text(text: str) -> str | None:
             normalized = _normalize_patient_name_value(match.group(1))
             if normalized:
                 return normalized
+                
+    for token in clean_text.split():
+        token = re.sub(r"(?:입니다|이에요|예요|이요|요|,)$", "", token).strip()
+        if 2 <= len(token) <= 4 and re.fullmatch(r"[가-힣]{2,4}", token):
+            return token
+            
     return None
 
 
@@ -640,6 +647,7 @@ def _extract_date_from_text(text: str, now: datetime) -> str | None:
 
 
 def _extract_time_from_text(text: str) -> str | None:
+    text = text.replace("ㅛㅣ", "시")
     if "정오" in text:
         return "12:00"
     if "자정" in text:

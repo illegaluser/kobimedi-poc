@@ -825,9 +825,15 @@ def _sync_identity_state_from_intent(ticket: dict, session_state: dict | None, i
     proxy_flag = intent_result.get("is_proxy_booking")
 
     if proxy_flag is not None:
-        ticket["is_proxy_booking"] = bool(proxy_flag)
-        if session_state is not None:
-            session_state["is_proxy_booking"] = bool(proxy_flag)
+        # Bug fix (F-031): In chat mode, LLM must NOT assume is_proxy_booking=False.
+        # The user must explicitly confirm self-booking vs proxy-booking.
+        # Only trust True (clear proxy signal extracted from message) in chat mode.
+        # False is accepted only in batch mode or if user explicitly confirmed it via
+        # _consume_pending_identity_input (which sets session_state directly).
+        if not (is_chat and proxy_flag is False):
+            ticket["is_proxy_booking"] = bool(proxy_flag)
+            if session_state is not None:
+                session_state["is_proxy_booking"] = bool(proxy_flag)
 
     if patient_name:
         ticket["patient_name"] = patient_name
@@ -856,15 +862,19 @@ def _extract_patient_name(text: str | None) -> str | None:
     if not normalized:
         return None
 
-    candidates = [normalized]
     match = re.search(r"(?:제 이름은|이름은|저는|환자 이름은)\s*([가-힣A-Za-z]{2,20})", normalized)
     if match:
-        candidates.insert(0, match.group(1))
-
-    for candidate in candidates:
-        cleaned = re.sub(r"(?:입니다|이에요|예요|이요|요)$", "", candidate).strip(" .,!")
-        if re.fullmatch(r"[가-힣A-Za-z]{2,20}", cleaned):
-            return cleaned
+        cleaned = re.sub(r"(?:입니다|이에요|예요|이요|요)$", "", match.group(1)).strip(" .,!")
+        return cleaned
+        
+    text_without_phone = re.sub(r"01[0-9][- ]?\d{3,4}[- ]?\d{4}", "", normalized)
+    clean_text = re.sub(r"[^가-힣A-Za-z\s]", " ", text_without_phone)
+    
+    for token in clean_text.split():
+        token = re.sub(r"(?:입니다|이에요|예요|이요|요)$", "", token).strip()
+        if 2 <= len(token) <= 4 and re.fullmatch(r"[가-힣]{2,4}", token):
+            return token
+            
     return None
 
 
@@ -1130,8 +1140,15 @@ def _consume_pending_identity_input(
     session_state["pending_missing_info_queue"] = list(pending_missing_info)
     session_state["pending_missing_info"] = list(pending_missing_info)
 
+    # Bug fix (F-042): Reset the clarify turn count as soon as any identity field
+    # is successfully consumed — regardless of whether more fields still remain.
+    # Previously the reset only happened inside `if pending_missing_info:`, which
+    # meant consuming the LAST identity field (emptying the queue) never triggered
+    # a reset, causing the main flow to increment the counter an extra time.
+    if consumed_identity:
+        _reset_clarify_turn_count(session_state)
+
     if pending_missing_info:
-        _increment_clarify_turn_count(session_state)
         if _should_escalate_for_clarify_limit(session_state, pending_missing_info):
             record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
             return (
@@ -1147,6 +1164,10 @@ def _consume_pending_identity_input(
                 None,
             )
         record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
+        
+        if not consumed_identity:
+            _increment_clarify_turn_count(session_state)
+            
         return (
             _build_response_and_record(
                 session_state,
@@ -1574,7 +1595,11 @@ def process_ticket(
             action = pending_action
         elif inferred_action in {"cancel_appointment", "modify_appointment", "check_appointment"}:
             action = inferred_action
-        elif inferred_action == "book_appointment" and has_booking_slots:
+        elif inferred_action == "book_appointment":
+            # Bug fix (F-031, F-042): Always upgrade to book_appointment when user
+            # clearly requests booking, even without slots yet.  Previously the
+            # `has_booking_slots` guard prevented the proxy question from being asked
+            # when the first message contained no date/time (e.g. "예약할래요").
             action = inferred_action
 
     previous_pending_action = (state or {}).get("pending_action")

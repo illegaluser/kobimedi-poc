@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from src.agent import process_ticket
+from src.agent import (
+    _extract_patient_contact,
+    _extract_patient_name,
+    process_ticket,
+)
+from src.models import Action, PolicyResult
 
 
 REFERENCE_NOW = datetime(2026, 3, 24, 2, 0, tzinfo=timezone.utc)
@@ -25,6 +30,10 @@ def _book_intent(department="내과", date="2026-03-25", time="14:00", **extra):
     }
 
 
+# ---------------------------------------------------------------------------
+# F-031: proxy question must be the FIRST thing asked in chat booking
+# ---------------------------------------------------------------------------
+
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
@@ -37,11 +46,7 @@ def test_F031_proxy_question_is_first_for_chat_booking(
 ):
     mock_classify_safety.return_value = SAFE_RESULT
     mock_classify_intent.return_value = _book_intent()
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
         "ambiguous": False,
@@ -76,6 +81,10 @@ def test_F031_proxy_question_is_first_for_chat_booking(
     mock_apply_policy.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# F-032: self-booking collects contact → confirmation
+# ---------------------------------------------------------------------------
+
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
@@ -88,11 +97,7 @@ def test_F032_self_booking_collects_patient_contact_then_confirms(
 ):
     mock_classify_safety.return_value = SAFE_RESULT
     mock_classify_intent.return_value = _book_intent()
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
         "ambiguous": False,
@@ -146,6 +151,10 @@ def test_F032_self_booking_collects_patient_contact_then_confirms(
     assert mock_apply_policy.call_count == 1
 
 
+# ---------------------------------------------------------------------------
+# F-033: proxy booking collects actual patient info
+# ---------------------------------------------------------------------------
+
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
@@ -158,11 +167,7 @@ def test_F033_proxy_booking_collects_actual_patient_info(
 ):
     mock_classify_safety.return_value = SAFE_RESULT
     mock_classify_intent.return_value = _book_intent(is_proxy_booking=True)
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "초진",
         "ambiguous": False,
@@ -215,6 +220,10 @@ def test_F033_proxy_booking_collects_actual_patient_info(
     assert appointment["customer_type"] == "초진"
 
 
+# ---------------------------------------------------------------------------
+# F-041 / F-043 / F-044: pending queue and slots persist across turns
+# ---------------------------------------------------------------------------
+
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
@@ -242,11 +251,7 @@ def test_F041_F043_F044_pending_queue_and_slots_persist_across_turns(
             "missing_info": [],
         },
     ]
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
         "ambiguous": False,
@@ -304,11 +309,17 @@ def test_F041_F043_F044_pending_queue_and_slots_persist_across_turns(
         "time": "14:00",
         "department": "내과",
     }
-    intent_payload = mock_apply_policy.call_args[0][0]
-    assert intent_payload["department"] == "내과"
-    assert intent_payload["date"] == "2026-03-25"
-    assert intent_payload["time"] == "14:00"
+    # Verify apply_policy was called with the correct booking intent (PolicyTicket object)
+    policy_call_arg = mock_apply_policy.call_args[0][0]
+    assert policy_call_arg.intent == "book_appointment"
+    booking_time_str = str(policy_call_arg.context.get("appointment_time") or "")
+    assert "2026-03-25" in booking_time_str
+    assert "14:00" in booking_time_str
 
+
+# ---------------------------------------------------------------------------
+# F-042: clarify turn count escalates after 4 failed proxy-question answers
+# ---------------------------------------------------------------------------
 
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
@@ -322,11 +333,7 @@ def test_F042_clarify_turn_limit_escalates_after_four_turns(
 ):
     mock_classify_safety.return_value = SAFE_RESULT
     mock_classify_intent.return_value = _book_intent()
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
         "ambiguous": False,
@@ -378,6 +385,10 @@ def test_F042_clarify_turn_limit_escalates_after_four_turns(
     assert session_state["clarify_turn_count"] >= 4
 
 
+# ---------------------------------------------------------------------------
+# F-045: alternative slot selection flows to confirmation
+# ---------------------------------------------------------------------------
+
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
@@ -394,20 +405,15 @@ def test_F045_alternative_slot_selection_flows_to_confirmation(
         {"action": "clarify", "department": None, "date": None, "time": None, "missing_info": []},
     ]
     mock_apply_policy.side_effect = [
-        {
-            "allowed": False,
-            "reason": "요청하신 시간에는 예약이 이미 가득 찼습니다. 다른 시간을 선택해 주세요.",
-            "recommended_action": "clarify",
-            "alternative_slots": [
+        PolicyResult(
+            action=Action.CLARIFY,
+            message="요청하신 시간에는 예약이 이미 가득 찼습니다. 다른 시간을 선택해 주세요.",
+            suggested_slots=[
                 "2026-03-25T14:30:00+00:00",
                 "2026-03-25T15:00:00+00:00",
             ],
-        },
-        {
-            "allowed": True,
-            "reason": "정책 검사를 통과했습니다.",
-            "recommended_action": "book_appointment",
-        },
+        ),
+        PolicyResult(action=Action.BOOK_APPOINTMENT),
     ]
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
@@ -456,6 +462,10 @@ def test_F045_alternative_slot_selection_flows_to_confirmation(
     assert appointment["time"] == "15:00"
 
 
+# ---------------------------------------------------------------------------
+# F-046: persists only after final confirmation
+# ---------------------------------------------------------------------------
+
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
@@ -470,11 +480,7 @@ def test_F046_persists_only_after_final_confirmation(
 ):
     mock_classify_safety.return_value = SAFE_RESULT
     mock_classify_intent.return_value = _book_intent()
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
         "ambiguous": False,
@@ -540,6 +546,73 @@ def test_F046_persists_only_after_final_confirmation(
     mock_create_booking.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# F-042: clarify_turn_count resets when valid information is provided
+# ---------------------------------------------------------------------------
+
+@patch("src.agent.resolve_customer_type_from_history")
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+@patch("src.agent.classify_safety")
+def test_F042_clarify_turn_count_resets_on_progress(
+    mock_classify_safety,
+    mock_classify_intent,
+    mock_apply_policy,
+    mock_resolve_customer_type,
+):
+    mock_classify_safety.return_value = SAFE_RESULT
+    # 정보가 점진적으로 채워지는 시나리오 모의
+    mock_classify_intent.side_effect = [
+        {"action": "clarify", "department": None, "date": None, "time": None, "missing_info": ["is_proxy_booking"]},
+        {"action": "clarify", "department": None, "date": None, "time": None, "missing_info": ["patient_name", "patient_contact"]},
+        {"action": "clarify", "department": None, "date": "2026-03-31", "time": None, "missing_info": ["time"]},
+    ]
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "재진", "ambiguous": False, "matched_bookings": [],
+        "has_non_cancelled_history": True, "has_cancelled_history": False,
+    }
+
+    session_state = {}
+
+    # Turn 1: "예약할래요" → action inferred as book_appointment → proxy question
+    first_result = process_ticket(
+        {"message": "예약할래요"},
+        all_appointments=[], existing_appointment=None,
+        session_state=session_state, now=REFERENCE_NOW,
+    )
+    assert first_result["action"] == "clarify"
+    assert session_state.get("clarify_turn_count", 0) == 1
+
+    # Turn 2: "본인입니다." → proxy consumed, count reset then re-incremented for next question
+    second_result = process_ticket(
+        {"message": "본인입니다."},
+        all_appointments=[], existing_appointment=None,
+        session_state=session_state, now=REFERENCE_NOW,
+    )
+    assert second_result["action"] == "clarify"
+    # 진전이 있었으므로 카운트는 최대 1 (리셋 후 다음 질문으로 인한 1회 증가)
+    assert session_state.get("clarify_turn_count", 0) <= 1
+
+    # Turn 3: "이경석, 010-2938-4744" → 이름+연락처 동시 추출, count reset
+    third_result = process_ticket(
+        {"message": "이경석, 010-2938-4744"},
+        all_appointments=[], existing_appointment=None,
+        session_state=session_state, now=REFERENCE_NOW,
+    )
+    assert third_result["action"] == "clarify"
+    # 이름+연락처가 동시에 소비되었으므로 카운트는 리셋 상태(0) — 절대 에스컬레이트 없음
+    assert session_state.get("clarify_turn_count", 0) <= 1
+    assert third_result["action"] != "escalate"
+    # 이름과 연락처가 올바르게 추출되어 세션에 저장됨
+    assert session_state.get("patient_name") == "이경석"
+    assert session_state.get("patient_contact") == "010-2938-4744"
+
+
+# ---------------------------------------------------------------------------
+# F-047: batch mode skips proxy question and directly shows confirmation
+# ---------------------------------------------------------------------------
+
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
@@ -552,11 +625,7 @@ def test_F047_batch_mode_does_not_force_proxy_question_and_uses_single_turn(
 ):
     mock_classify_safety.return_value = SAFE_RESULT
     mock_classify_intent.return_value = _book_intent()
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve_customer_type.return_value = {
         "customer_type": "재진",
         "ambiguous": False,
@@ -583,6 +652,10 @@ def test_F047_batch_mode_does_not_force_proxy_question_and_uses_single_turn(
     assert "예약할까요" in result["response"]
 
 
+# ---------------------------------------------------------------------------
+# F-048: chat.py and run.py share the same agent core
+# ---------------------------------------------------------------------------
+
 def test_F048_chat_and_run_share_agent_core_by_import_contract():
     from chat import create_session as chat_create_session  # noqa: PLC0415
     from chat import process_message as chat_process_message  # noqa: PLC0415
@@ -592,3 +665,78 @@ def test_F048_chat_and_run_share_agent_core_by_import_contract():
     assert chat_create_session is create_session
     assert chat_process_message is process_message
     assert run_process_ticket is process_ticket
+
+
+# ---------------------------------------------------------------------------
+# F-049: name + contact extracted simultaneously from a single message
+# ---------------------------------------------------------------------------
+
+def test_F049_extract_patient_name_from_mixed_input():
+    """이름 추출 함수는 전화번호가 섞인 문장에서도 이름만 정확히 추출해야 한다 (re.search 기반)."""
+    # 이름+연락처 콤마 구분
+    assert _extract_patient_name("이경석, 010-2938-4744") == "이경석"
+    # 이름+연락처 공백 구분
+    assert _extract_patient_name("김영희 010-1111-2222") == "김영희"
+    # 이름만 (기준선)
+    assert _extract_patient_name("이경석") == "이경석"
+    # "이름은" 패턴
+    assert _extract_patient_name("환자 이름은 박지수예요") == "박지수"
+    # 전화번호만 → None
+    assert _extract_patient_name("010-2938-4744") is None
+
+
+def test_F049_extract_patient_contact_from_mixed_input():
+    """전화번호 추출은 이름이 함께 있어도 정상 동작해야 한다."""
+    assert _extract_patient_contact("이경석, 010-2938-4744") == "010-2938-4744"
+    assert _extract_patient_contact("김영희 010-1111-2222") == "010-1111-2222"
+    assert _extract_patient_contact("010-9999-8888") == "010-9999-8888"
+    assert _extract_patient_contact("이경석") is None
+
+
+@patch("src.agent.resolve_customer_type_from_history")
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+@patch("src.agent.classify_safety")
+def test_F049_simultaneous_name_contact_consumed_in_one_turn(
+    mock_classify_safety,
+    mock_classify_intent,
+    mock_apply_policy,
+    mock_resolve_customer_type,
+):
+    """'이경석, 010-2938-4744' 입력 시 patient_name과 patient_contact가 한 턴에 동시 수집된다."""
+    mock_classify_safety.return_value = SAFE_RESULT
+    mock_classify_intent.return_value = _book_intent()
+    mock_apply_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "신규",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [],
+        "has_non_cancelled_history": False,
+        "has_cancelled_history": False,
+    }
+
+    # 세션 준비: 이미 is_proxy_booking=False가 확인된 상태, 이름+연락처 미입력
+    session_state = {
+        "is_proxy_booking": False,
+        "pending_missing_info": ["patient_name", "patient_contact"],
+        "pending_missing_info_queue": ["patient_name", "patient_contact"],
+        "pending_action": "book_appointment",
+        "accumulated_slots": {"department": "내과", "date": "2026-03-25", "time": "14:00"},
+    }
+
+    result = process_ticket(
+        {"message": "이경석, 010-2938-4744"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+
+    # 두 필드가 동시에 소비되었으므로 더 이상 같은 정보를 묻지 않음
+    assert session_state.get("patient_name") == "이경석"
+    assert session_state.get("patient_contact") == "010-2938-4744"
+    # 이름+연락처 소비 → escalate 아님
+    assert result["action"] != "escalate"
+    # 카운트 리셋 확인
+    assert session_state.get("clarify_turn_count", 0) == 0

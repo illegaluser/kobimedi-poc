@@ -275,7 +275,7 @@
       "policy_ref": "policy_digest §5.7",
       "priority": 1,
       "status": "required",
-      "passes": false,
+      "passes": true,
       "test_ref": "tests/test_dialogue.py",
       "impl_note": "현재 로직이 있으나 실제 대화에서 안정적으로 트리거되지 않음. 예약 의도(book/modify 등) 확정 후, 다른 정보를 묻기 전에 가장 먼저 질문하도록 agent.py의 대화 시작 부분을 재검토 및 강화해야 함."
     },
@@ -372,7 +372,7 @@
       "policy_ref": "policy_digest §5.4 (개선)",
       "priority": 1,
       "status": "required",
-      "passes": false,
+      "passes": true,
       "impl_note": "입력값에 오타(예: '8ㅛㅣ')가 감지되었을 때 에스컬레이트 트리거로 삼지 않고, 교정을 제안하는 미니 상태(pending_typo_correction)를 도입하거나 추출 정규식을 보완."
     },
     {
@@ -394,7 +394,7 @@
       "policy_ref": "policy_digest §5.4",
       "priority": 1,
       "status": "required",
-      "passes": false,
+      "passes": true,
       "test_ref": "tests/test_dialogue.py",
       "impl_note": "정보를 순차적으로 입력하는 정상적인 대화 흐름에서도 카운트가 누적되어 4회에 도달 시 바로 상담원으로 연결되는 문제 발생. 유효한 정보가 입력되어 상태가 진전되면 카운트를 초기화하는 로직 필요."
     },
@@ -472,7 +472,7 @@
       "policy_ref": "policy_digest §6.1 (개선)",
       "priority": 1,
       "status": "required",
-      "passes": false,
+      "passes": true,
       "impl_note": "_extract_patient_name 함수가 re.fullmatch를 사용하여 문장 내 이름 외의 문자가 있으면 추출에 실패하는 버그 수정. 전화번호가 함께 제공되어도 이름만 정확히 추출할 수 있도록 정규식 개선."
     },
     {
