@@ -166,13 +166,11 @@ class TestGetAvailableSlots:
         api_body = {
             "status": "success",
             "data": {
-                "slots": {
-                    "2026-04-01": [
-                        {"time": "2026-04-01T01:00:00.000Z"},  # KST 10:00
-                        {"time": "2026-04-01T01:30:00.000Z"},  # KST 10:30
-                        {"time": "2026-04-01T02:00:00.000Z"},  # KST 11:00
-                    ]
-                }
+                "2026-04-01": [
+                    {"start": "2026-04-01T01:00:00.000Z"},  # KST 10:00
+                    {"start": "2026-04-01T01:30:00.000Z"},  # KST 10:30
+                    {"start": "2026-04-01T02:00:00.000Z"},  # KST 11:00
+                ]
             },
         }
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
@@ -184,7 +182,7 @@ class TestGetAvailableSlots:
         """가용 슬롯 없음 → 빈 리스트 반환."""
         api_body = {
             "status": "success",
-            "data": {"slots": {"2026-04-01": []}},
+            "data": {"2026-04-01": []},
         }
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
             with patch("requests.get", return_value=_mock_response(200, api_body)):
@@ -217,7 +215,7 @@ class TestGetAvailableSlots:
 
     def test_correct_headers_sent(self):
         """cal-api-version: 2024-09-04 헤더 검증."""
-        api_body = {"status": "success", "data": {"slots": {}}}
+        api_body = {"status": "success", "data": {}}
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
             with patch("requests.get", return_value=_mock_response(200, api_body)) as mock_get:
                 calcom_client.get_available_slots("내과", "2026-04-01")
@@ -231,9 +229,7 @@ class TestGetAvailableSlots:
         api_body = {
             "status": "success",
             "data": {
-                "slots": {
-                    "2026-04-02": [{"time": "2026-04-02T01:00:00.000Z"}]
-                }
+                "2026-04-02": [{"start": "2026-04-02T01:00:00.000Z"}]
             },
         }
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
@@ -348,9 +344,7 @@ class TestCreateBooking:
         assert attendee["email"] == "01012345678@kobimedi.local"
         assert attendee["name"] == "홍길동"
         assert attendee["timeZone"] == "Asia/Seoul"
-        # notes에 실제 전화번호 포함
-        assert "010-1234-5678" in payload["notes"]
-        # metadata
+        # metadata (notes 필드는 cal.com v2에서 미지원 → 제거됨)
         assert payload["metadata"]["patient_contact"] == "010-1234-5678"
 
     def test_unmapped_dept_returns_none(self):
@@ -616,30 +610,32 @@ class TestBatchModeCalcom:
         from unittest.mock import MagicMock
 
         mock_slots = ["10:00", "10:30", "11:00"]  # 요청 시간 10:00 포함
+        mock_booking = {**self._base_ticket("10:00"), "id": "b-test", "status": "active", "booking_time": "2026-04-01T10:00:00+09:00"}
 
         with patch.object(calcom_client, "get_available_slots", return_value=mock_slots):
             with patch.object(calcom_client, "create_booking", return_value={"id": 777}):
-                with patch("src.agent.classify_intent") as mock_classify:
-                    mock_classify.return_value = {
-                        "action": "book_appointment",
-                        "department": "내과",
-                        "date": "2026-04-01",
-                        "time": "10:00",
-                        "customer_type": "new",
-                        "missing_info": [],
-                    }
-                    with patch("src.agent.apply_policy") as mock_policy:
-                        policy_mock = MagicMock()
-                        policy_mock.action.value = "book_appointment"
-                        policy_mock.suggested_slots = []
-                        mock_policy.return_value = policy_mock
+                with patch("src.agent.create_booking", return_value=mock_booking):
+                    with patch("src.agent.classify_intent") as mock_classify:
+                        mock_classify.return_value = {
+                            "action": "book_appointment",
+                            "department": "내과",
+                            "date": "2026-04-01",
+                            "time": "10:00",
+                            "customer_type": "new",
+                            "missing_info": [],
+                        }
+                        with patch("src.agent.apply_policy") as mock_policy:
+                            policy_mock = MagicMock()
+                            policy_mock.action.value = "book_appointment"
+                            policy_mock.suggested_slots = []
+                            mock_policy.return_value = policy_mock
 
-                        result = process_ticket(
-                            ticket=self._base_ticket("10:00"),
-                            all_appointments=[],
-                            session_state=None,
-                            now=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc),
-                        )
+                            result = process_ticket(
+                                ticket=self._base_ticket("10:00"),
+                                all_appointments=[],
+                                session_state=None,
+                                now=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc),
+                            )
 
         assert result["action"] == "book_appointment"
 
@@ -649,29 +645,32 @@ class TestBatchModeCalcom:
         from datetime import datetime, timezone
         from unittest.mock import MagicMock
 
+        mock_booking = {**self._base_ticket("10:00"), "id": "b-test", "status": "active", "booking_time": "2026-04-01T10:00:00+09:00"}
+
         with patch.dict(os.environ, {}, clear=True):
             env_without_key = {k: v for k, v in os.environ.items() if k != "CALCOM_API_KEY"}
             with patch.dict(os.environ, env_without_key, clear=True):
-                with patch("src.agent.classify_intent") as mock_classify:
-                    mock_classify.return_value = {
-                        "action": "book_appointment",
-                        "department": "내과",
-                        "date": "2026-04-01",
-                        "time": "10:00",
-                        "customer_type": "new",
-                        "missing_info": [],
-                    }
-                    with patch("src.agent.apply_policy") as mock_policy:
-                        policy_mock = MagicMock()
-                        policy_mock.action.value = "book_appointment"
-                        policy_mock.suggested_slots = []
-                        mock_policy.return_value = policy_mock
+                with patch("src.agent.create_booking", return_value=mock_booking):
+                    with patch("src.agent.classify_intent") as mock_classify:
+                        mock_classify.return_value = {
+                            "action": "book_appointment",
+                            "department": "내과",
+                            "date": "2026-04-01",
+                            "time": "10:00",
+                            "customer_type": "new",
+                            "missing_info": [],
+                        }
+                        with patch("src.agent.apply_policy") as mock_policy:
+                            policy_mock = MagicMock()
+                            policy_mock.action.value = "book_appointment"
+                            policy_mock.suggested_slots = []
+                            mock_policy.return_value = policy_mock
 
-                        result = process_ticket(
-                            ticket=self._base_ticket("10:00"),
-                            all_appointments=[],
-                            session_state=None,
-                            now=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc),
-                        )
+                            result = process_ticket(
+                                ticket=self._base_ticket("10:00"),
+                                all_appointments=[],
+                                session_state=None,
+                                now=datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc),
+                            )
 
         assert result["action"] == "book_appointment"

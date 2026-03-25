@@ -30,10 +30,17 @@ def _parse_now(timestamp: str | None) -> datetime:
 
 
 def _run_batch_case(case: dict) -> dict:
+    from unittest.mock import patch
     from src.agent import process_ticket
 
     now = _parse_now(case.get("timestamp"))
-    result = process_ticket(case, all_appointments=[], now=now)
+
+    # Mock storage write to avoid file I/O errors in eval
+    def _mock_create_booking(appointment_data):
+        return {"id": "eval-mock", "status": "active", **(appointment_data or {})}
+
+    with patch("src.agent.create_booking", side_effect=_mock_create_booking):
+        result = process_ticket(case, all_appointments=[], now=now)
     return result
 
 

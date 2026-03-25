@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from freezegun import freeze_time
 
@@ -9,10 +10,14 @@ from run import run_batch
 
 @freeze_time("2024-01-22 10:00:00")
 def test_run_batch_generates_correct_output_and_metrics(tmp_path: Path):
+    # 테스트 격리: 실제 bookings.json 대신 임시 파일 사용
+    tmp_bookings = tmp_path / "bookings.json"
+    tmp_bookings.write_text("[]", encoding="utf-8")
+
     input_tickets = [
         {
             "ticket_id": "T001",
-            "message": "안녕하세요, 내일 오전 10시에 내과 예약하고 싶어요.",
+            "message": "안녕하세요, 내일 오전 10시에 내과 예약하고 싶어요. 연락처는 01012345678입니다.",
             "customer_name": "김민준",
             "customer_type": "new",
         },
@@ -36,7 +41,8 @@ def test_run_batch_generates_correct_output_and_metrics(tmp_path: Path):
     output_path = tmp_path / "output.json"
     input_path.write_text(json.dumps(input_tickets, ensure_ascii=False))
 
-    results, metrics = run_batch(str(input_path), str(output_path))
+    with patch("src.storage.DEFAULT_BOOKINGS_PATH", tmp_bookings):
+        results, metrics = run_batch(str(input_path), str(output_path))
 
     assert output_path.exists()
     assert len(results) == 4

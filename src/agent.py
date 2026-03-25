@@ -1,8 +1,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 from unittest.mock import Mock
 
 from .classifier import safety_check, classify_intent
@@ -1780,8 +1783,8 @@ def process_ticket(
                 if proactive_slots is not None and proactive_slots:
                     slots_str = ", ".join(proactive_slots)
                     clarify_message = f"예약 가능한 시간은 {slots_str}입니다. 언제가 좋으신가요?"
-            except Exception:
-                pass  # 조회 실패 시 기본 clarify 메시지 유지
+            except Exception as exc:
+                logger.debug("cal.com proactive slot query failed: %s", exc)
 
         return _build_response_and_record(
             state,
@@ -2076,6 +2079,25 @@ def process_ticket(
                     )
 
             # 배치 모드: 확인 없이 즉시 예약 결정 (cal.com 비활성 또는 성공)
+            # 로컬 영속화 (bookings.json = source of truth)
+            try:
+                persisted_booking = create_booking(appointment)
+            except Exception:
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                return _build_response_and_record(
+                    state,
+                    action="clarify",
+                    message="예약 정보를 저장하는 중 문제가 발생했습니다. 다시 시도해주세요.",
+                    department=department,
+                    ticket=ticket,
+                    classified_intent="book_appointment",
+                    safety_result=safety_result,
+                    intent_result=intent_result,
+                    policy_result={"allowed": False},
+                    customer_type=customer_type,
+                )
+            all_appointments.append(persisted_booking)
+            appointment = persisted_booking
             message = build_confirmation_question(appointment, now)
             record_kpi_event(KpiEvent.AGENT_SUCCESS)
             return _build_response_and_record(

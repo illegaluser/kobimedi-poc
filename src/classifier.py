@@ -477,6 +477,14 @@ def _extract_patient_name_from_text(text: str) -> str | None:
                 return normalized
 
     for token in clean_text.split():
+        # 동사/형용사 활용형은 이름 후보에서 즉시 제외
+        if re.search(
+            r"(?:어요|아요|에요|해요|줘요|게요|까요|래요|려요|네요|돼요|나요"
+            r"|해줘|싶어|좋아|없어|있어|같아|맞아|원해|알아|아파"
+            r"|할게|볼게|갈게|할까|할래|가려|보여)$",
+            token,
+        ):
+            continue
         token = re.sub(r"(?:주세요|세요|입니다|이에요|예요|이요|요|,)$", "", token).strip()
         if (
             2 <= len(token) <= 3

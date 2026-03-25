@@ -632,6 +632,7 @@ def test_F042_clarify_turn_count_resets_on_progress(
 # F-047: batch mode skips proxy question and directly shows confirmation
 # ---------------------------------------------------------------------------
 
+@patch("src.agent.create_booking")
 @patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
@@ -641,6 +642,7 @@ def test_F047_batch_mode_does_not_force_proxy_question_and_uses_single_turn(
     mock_classify_intent,
     mock_apply_policy,
     mock_resolve_customer_type,
+    mock_create_booking,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
     mock_classify_intent.side_effect = _context_aware_book_intent()
@@ -653,6 +655,7 @@ def test_F047_batch_mode_does_not_force_proxy_question_and_uses_single_turn(
         "has_non_cancelled_history": True,
         "has_cancelled_history": False,
     }
+    mock_create_booking.side_effect = lambda record: {**record, "id": "b-test", "status": "active"}
 
     result = process_ticket(
         {

@@ -106,8 +106,8 @@ def get_available_slots(department: str, target_date: str) -> Optional[list[str]
     headers = _common_headers("2024-09-04")
     params = {
         "eventTypeId": etype_id,
-        "startTime": f"{target_date}T00:00:00+09:00",
-        "endTime": f"{target_date}T23:59:59+09:00",
+        "start": f"{target_date}T00:00:00+09:00",
+        "end": f"{target_date}T23:59:59+09:00",
     }
 
     try:
@@ -115,13 +115,13 @@ def get_available_slots(department: str, target_date: str) -> Optional[list[str]
         response.raise_for_status()
         data = response.json()
 
-        # v2 응답 구조: {"status": "success", "data": {"slots": {"YYYY-MM-DD": [{"time": "..."}, ...]}}}
-        slots_by_date: dict = data.get("data", {}).get("slots", {})
+        # v2 응답 구조: {"status": "success", "data": {"YYYY-MM-DD": [{"start": "..."}, ...]}}
+        slots_by_date: dict = data.get("data", {})
         raw_slots: list = slots_by_date.get(target_date, [])
 
         result: list[str] = []
         for slot in raw_slots:
-            raw_time = slot.get("time", "")
+            raw_time = slot.get("start", "")
             if not raw_time:
                 continue
             try:
@@ -195,7 +195,6 @@ def create_booking(
             "email": dummy_email,
             "timeZone": "Asia/Seoul",
         },
-        "notes": f"환자 연락처: {patient_contact}",
         "metadata": {
             "patient_contact": patient_contact,
             "department": department,
@@ -212,6 +211,19 @@ def create_booking(
                 department, date, time,
             )
             return False  # 슬롯 선점 신호
+
+        # cal.com v2는 슬롯 중복 시 409 대신 400 + "already has booking" 반환
+        if response.status_code == 400:
+            try:
+                err_msg = response.json().get("error", {}).get("message", "")
+            except Exception:
+                err_msg = ""
+            if "already has booking" in err_msg or "not available" in err_msg:
+                logger.warning(
+                    "cal.com create_booking 400 Slot Conflict: dept=%s date=%s time=%s msg=%s",
+                    department, date, time, err_msg,
+                )
+                return False  # 슬롯 선점 신호 (409와 동일 처리)
 
         response.raise_for_status()
         data = response.json()
