@@ -131,6 +131,7 @@
       "policy_ref": "policy_digest §2.2, AGENTS.md rule 2",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_classifier.py"
     },
     {
@@ -141,6 +142,7 @@
       "policy_ref": "policy_digest §2.2",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_classifier.py"
     },
     {
@@ -151,6 +153,7 @@
       "policy_ref": "policy_digest §12.1, AGENTS.md rule 9",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_batch.py"
     },
     {
@@ -160,7 +163,8 @@
       "description": "classified_intent는 해석된 의도 라벨, action은 시스템이 실제 취한 최종 동작. 둘이 다를 수 있음(예: 의도는 book이지만 action은 clarify).",
       "policy_ref": "policy_digest §12.1",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-021",
@@ -170,6 +174,7 @@
       "policy_ref": "policy_digest §6.1",
       "priority": 1,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_classifier.py"
     },
     {
@@ -179,7 +184,8 @@
       "description": "이비인후과/내과/정형외과 또는 담당 의사명 기반 분과 추출.",
       "policy_ref": "policy_digest §6.1",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-023",
@@ -188,7 +194,8 @@
       "description": "메시지 또는 context에서 환자 본인/대리 예약 대상 이름 추출. ticket.customer_name은 힌트로만 사용.",
       "policy_ref": "policy_digest §6.1, §0.2",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-024",
@@ -197,7 +204,8 @@
       "description": "메시지에서 전화번호 패턴(010-xxxx-xxxx 등) 추출. 추출 실패 시 clarify 단계에서 별도 수집.",
       "policy_ref": "policy_digest §5.6, §6.1, §6.4",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-025",
@@ -206,7 +214,8 @@
       "description": "동명이인 해소용 생년월일 추출. 전화번호 미확보 또는 충돌 시에만 요청.",
       "policy_ref": "policy_digest §6.1, §6.4",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-026",
@@ -215,7 +224,8 @@
       "description": "메시지에서 '엄마를 대신해서', '아버지 예약', '가족 대신' 등 명시적 대리 표현 감지. 감지 즉시 proxy_booking=true로 전환.",
       "policy_ref": "policy_digest §6.3",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-027",
@@ -224,7 +234,8 @@
       "description": "is_emergency 플래그 추출. 급성, 지금 너무 아파, 응급 등 키워드 기반.",
       "policy_ref": "policy_digest §4.2",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-028",
@@ -233,7 +244,8 @@
       "description": "변경/취소/확인 요청 시 기존 예약 식별 힌트(날짜, 분과, 예약번호) 추출.",
       "policy_ref": "policy_digest §6.1, §9",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-029",
@@ -242,7 +254,8 @@
       "description": "증상 기반 분과 매핑 테이블을 이용한 안내. 진단·질병명 확정 금지.",
       "policy_ref": "policy_digest §8.5",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-030",
@@ -251,7 +264,8 @@
       "description": "ticket.customer_type은 추출 힌트로만 사용. 초진/재진 최종 판정은 저장소에서.",
       "policy_ref": "policy_digest §0.2, §7.2",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-031",
@@ -625,7 +639,8 @@
       "description": "LLM 구조화 출력은 Ollama qwen3-coder:30b의 format='json' 사용.",
       "policy_ref": "AGENTS.md rule 8, policy_digest §0.1",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-084",
@@ -634,7 +649,8 @@
       "description": "Ollama 호출 실패 또는 파싱 오류 시 거짓 성공 반환 금지. fallback 처리 필수.",
       "policy_ref": "AGENTS.md rule 10 (analogous)",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-091",

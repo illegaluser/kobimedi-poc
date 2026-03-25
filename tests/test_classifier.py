@@ -289,6 +289,12 @@ def test_classify_intent_required_scenarios(mock_ollama_chat, user_message, llm_
     assert result["doctor_name"] == expected["doctor_name"]
     assert result["customer_type"] == expected["customer_type"]
     assert result["missing_info"] == expected["missing_info"]
+    # F-014: classified_intent must be present and must be a valid action enum value
+    assert "classified_intent" in result
+    assert result["classified_intent"] in [
+        "book_appointment", "modify_appointment", "cancel_appointment",
+        "check_appointment", "clarify", "escalate", "reject",
+    ]
 
     if "date" in expected:
         assert result["date"] == expected["date"]
@@ -305,6 +311,31 @@ def test_classify_intent_required_scenarios(mock_ollama_chat, user_message, llm_
 
     assert "감기입니다" not in json.dumps(result, ensure_ascii=False)
     mock_ollama_chat.assert_called_once()
+
+
+@patch("src.classifier.ollama.chat")
+def test_classify_intent_classified_intent_preserved_when_action_overridden_to_clarify(mock_ollama_chat):
+    """F-014: classified_intent reflects user intent; action may differ (e.g. clarify due to missing info)."""
+    mock_ollama_chat.return_value = _mock_ollama_payload(
+        {
+            "action": "book_appointment",
+            "department": "이비인후과",
+            "doctor_name": None,
+            "date": "2026-03-25",
+            "time": "14:00",
+            "customer_type": None,
+            "is_first_visit": None,
+            "missing_info": [],
+            "target_appointment_hint": None,
+        }
+    )
+
+    result = classify_intent("내일 오후 2시 이비인후과 예약", now=REFERENCE_NOW)
+
+    # Action is overridden to clarify due to missing customer_type
+    assert result["action"] == "clarify"
+    # But classified_intent captures the original user intent
+    assert result["classified_intent"] == "book_appointment"
 
 
 @patch("src.classifier.ollama.chat")

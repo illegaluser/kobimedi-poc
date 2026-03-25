@@ -66,6 +66,8 @@ The safety gate has already run. Classify only with the exact action strings bel
 - escalate
 - reject
 
+Return ONLY valid JSON. Do not use markdown code blocks like ```json
+
 Output MUST be valid JSON only.
 
 Return this schema:

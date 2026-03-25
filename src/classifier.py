@@ -904,6 +904,9 @@ def _classify_intent(user_message: str, now: datetime | None = None) -> dict:
     rule_action = _infer_action_from_text(normalized_message)
     llm_action = _normalize_action_value(llm_result.get("action"))
     action = llm_action or rule_action
+    # F-014: classified_intent captures the interpreted user intent BEFORE
+    # missing_info logic may override action to clarify.
+    classified_intent = action
 
     extracted_doctor_name = _extract_doctor_name(normalized_message)
     llm_doctor_name = _normalize_doctor_name_value(llm_result.get("doctor_name"))
@@ -951,6 +954,7 @@ def _classify_intent(user_message: str, now: datetime | None = None) -> dict:
 
     result = {
         "action": action,
+        "classified_intent": classified_intent,
         "department": department,
         "doctor_name": doctor_name,
         "date": date,

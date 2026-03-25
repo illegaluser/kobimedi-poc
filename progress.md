@@ -1,6 +1,29 @@
 # Project Progress
 
 ## Current status
+- **Phase 3 Complete**: 의도 분류 및 정보 추출 로직 구현 완료.
+  - `src/classifier.py` — `classify_intent()` 완성:
+    - **F-011**: 7개 action enum 엄수 (`_normalize_action_value` 검증, 무효값 → rule fallback).
+    - **F-012**: 불확실 의도 → clarify 폴백 (missing_info 非空 시 action=clarify 자동 전환).
+    - **F-013**: confidence/reasoning 하드코딩 없음 — 파이프라인 결과 기반으로 계산.
+    - **F-014**: `classified_intent` 필드 추가 — 사용자 원래 의도를 보존; `action`은 시스템 최종 동작으로 구분.
+    - **F-021**: 날짜/시간 추출 — 오늘/내일/모레/글피/요일/절대날짜/상대시간 지원.
+    - **F-022**: 분과 추출 — 이비인후과/내과/정형외과 + 의사명 매핑.
+    - **F-023**: 환자 성명 추출 — 자유문장 패턴 매칭.
+    - **F-024**: 전화번호 추출 — 010-XXXX-XXXX 정규식.
+    - **F-025**: 생년월일 추출 — 동명이인 해소용 보조 식별자.
+    - **F-026**: 대리 예약 선제 감지 — "엄마", "대신", "가족" 포함 시 즉시 `proxy_booking=true`.
+    - **F-027**: 응급/급성 통증 신호 추출 — `is_emergency` 플래그.
+    - **F-028**: 기존 예약 참조 추출 — `target_appointment_hint` (변경/취소/확인용).
+    - **F-029**: 증상 키워드 추출 → 분과 추천 (진단 금지).
+    - **F-030**: customer_type 힌트 수용; 최종 판정은 저장소.
+  - `src/llm_client.py` — `chat_json()` 완성:
+    - **F-083**: Ollama 호출 시 `format='json'` 강제.
+    - **F-084**: JSON 파싱 실패/Timeout → `clarify` fallback 반환, 거짓 성공 없음.
+  - `src/prompts.py` — CLASSIFICATION_SYSTEM_PROMPT에 "Return ONLY valid JSON. Do not use markdown code blocks like ```json" 추가.
+  - `pytest tests/test_classifier.py` 20/20 통과.
+  - `features.json`에서 F-011~F-014, F-021~F-030, F-083, F-084의 `"passes": true` 반영.
+
 - **Phase 2 Complete**: Safety-First 게이트웨이 구현 및 단위 테스트 완료.
   - `src/classifier.py` 내 `safety_check()` 로직 구현 완료:
     - **F-001**: Safety gate가 `process_ticket()` 파이프라인 최선행에서 실행됨. safety gate 차단 시 LLM 호출 생략.
@@ -27,7 +50,7 @@
   - `features.json`에서 F-034, F-035, F-036, F-037, F-038, F-039, F-061, F-062, F-063, F-064, F-065, F-066, F-067의 `"passes": true` 반영.
 
 ## Next step
-- **Proceed to Phase 3**: Dialogue State Machine & Policy Engine 완성.
+- **Proceed to Phase 4**: Dialogue State Machine & Policy Engine 완성.
   - `src/policy.py` 결정론적 정책 검사 (24시간 규칙, 정원, 운영시간) 완성 검증 및 테스트.
   - 멀티턴 대화 흐름: 본인/대리인 확인(F-031), 누락 정보 수집 큐(F-041), clarify_turn_count 상한(F-042) 테스트 보강.
   - `golden_eval/eval.py` 실행 및 Safe Resolution Rate >= 70% 검증.
