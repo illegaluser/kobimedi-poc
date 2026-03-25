@@ -164,7 +164,7 @@ def build_missing_info_question(
     if primary == "birth_date":
         return "동명이인 확인을 위해 환자분 생년월일을 YYYY-MM-DD 형식으로 알려주세요."
     if primary == "department":
-        return "어느 분과로 예약할까요?"
+        return "어느 분과로 예약할까요? 현재 예약 가능한 분과는 이비인후과, 내과, 정형외과입니다."
     if primary == "date":
         return f"{department}로 예약을 도와드릴게요. 원하시는 날짜를 알려주세요." if department else "원하시는 날짜를 알려주세요."
     if primary == "time":

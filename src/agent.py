@@ -837,6 +837,11 @@ def _merge_accumulated_slots(session_state: dict | None, intent_result: dict) ->
         "time": intent_result.get("time") or accumulated.get("time"),
     }
     if session_state is not None:
+        # 슬롯이 새로 채워졌으면 대화가 진전 중이므로 clarify 카운트 리셋
+        for key in ("department", "date", "time"):
+            if merged.get(key) and not accumulated.get(key):
+                _reset_clarify_turn_count(session_state)
+                break
         session_state["accumulated_slots"] = merged.copy()
     return merged
 

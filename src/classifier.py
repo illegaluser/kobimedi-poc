@@ -460,6 +460,14 @@ _NON_NAME_WORDS: frozenset[str] = frozenset({
     "맞아요", "알겠습니다", "그리고", "그런데", "그러면", "아니요",
     # Generic pronouns / vague words that are never patient names
     "아무", "누구", "무언가", "어떤", "그냥", "그게", "이게", "저게", "도와",
+    # Body parts (신체 부위 — 증상 표현에서 이름으로 오추출 방지)
+    "귀에", "목이", "배가", "허리", "무릎", "어깨", "손이", "발이",
+    "눈이", "코가", "입이", "머리", "가슴", "등이", "팔이", "다리",
+    # Body parts after particle stripping
+    "허리", "무릎", "어깨", "머리", "가슴", "다리",
+    # Symptom / common words (증상·일반 단어)
+    "문제", "증상", "통증", "아파", "아픈", "막혀", "결려",
+    "생긴", "받고", "보고", "싶은", "원하", "가능", "해주", "해줘",
 })
 
 
@@ -481,11 +489,14 @@ def _extract_patient_name_from_text(text: str) -> str | None:
         if re.search(
             r"(?:어요|아요|에요|해요|줘요|게요|까요|래요|려요|네요|돼요|나요"
             r"|해줘|싶어|좋아|없어|있어|같아|맞아|원해|알아|아파"
-            r"|할게|볼게|갈게|할까|할래|가려|보여)$",
+            r"|할게|볼게|갈게|할까|할래|가려|보여"
+            r"|아서|어서|해서|에서)$",
             token,
         ):
             continue
+        # 정중 표현 → 조사 순서로 제거
         token = re.sub(r"(?:주세요|세요|입니다|이에요|예요|이요|요|,)$", "", token).strip()
+        token = re.sub(r"[은는이가을를에서도로의와과]$", "", token).strip()
         if (
             2 <= len(token) <= 3
             and re.fullmatch(r"[가-힣]{2,3}", token)
@@ -567,7 +578,10 @@ def _is_department_guidance_request(text: str) -> bool:
 
 
 def _is_booking_related(text: str) -> bool:
-    return any(keyword in text for keyword in ["예약", "진료", "접수", "변경", "취소", "확인"])
+    return any(keyword in text for keyword in [
+        "예약", "진료", "접수", "변경", "취소", "확인",
+        "분과", "진료과",
+    ])
 
 
 def _is_safe_booking_segment(segment: str) -> bool:
@@ -679,8 +693,12 @@ def _extract_date_from_text(text: str, now: datetime) -> str | None:
         return (now.date() + timedelta(days=2)).isoformat()
     if "내일" in text:
         return (now.date() + timedelta(days=1)).isoformat()
+    if re.search(r"이틀\s*[후뒤]?", text):
+        return (now.date() + timedelta(days=2)).isoformat()
     if "모레" in text:
         return (now.date() + timedelta(days=2)).isoformat()
+    if re.search(r"삼일\s*[후뒤]?", text) or re.search(r"3\s*일\s*[후뒤]", text):
+        return (now.date() + timedelta(days=3)).isoformat()
     if "글피" in text:
         return (now.date() + timedelta(days=3)).isoformat()
     weekday_date = _parse_weekday_date(text, now)
