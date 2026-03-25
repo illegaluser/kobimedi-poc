@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.agent import process_ticket
+from src.metrics import get_metrics, KpiMetrics
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -33,29 +34,26 @@ def _resolve_ticket_now(ticket: dict, now: datetime | str | None = None) -> date
     return _parse_now(ticket.get("timestamp"))
 
 
-def run_batch(input_path: str, output_path: str, now: datetime | str | None = None) -> list[dict]:
+def run_batch(input_path: str, output_path: str, now: datetime | str | None = None) -> tuple[list[dict], KpiMetrics]:
+    metrics = get_metrics()
+    metrics.__init__()  # Reset metrics
+
     tickets = json.loads(Path(input_path).read_text(encoding="utf-8"))
     results: list[dict] = []
 
     for ticket in tickets:
         result = process_ticket(ticket, now=_resolve_ticket_now(ticket, now=now))
-        results.append(
-            {
-                "ticket_id": result.get("ticket_id") or ticket.get("ticket_id"),
-                "classified_intent": result.get("classified_intent"),
-                "department": result.get("department"),
-                "action": result.get("action"),
-                "response": result.get("response"),
-                "confidence": result.get("confidence"),
-                "reasoning": result.get("reasoning"),
-            }
-        )
+        results.append(result)
 
     Path(output_path).write_text(
         json.dumps(results, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    return results
+    
+    print("Batch processing complete. Metrics:")
+    print(json.dumps(metrics.as_dict(), indent=2))
+    
+    return results, metrics
 
 
 def main(argv: list[str] | None = None) -> None:

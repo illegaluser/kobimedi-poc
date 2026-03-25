@@ -22,6 +22,8 @@ from .storage import (
     normalize_patient_contact,
     resolve_customer_type_from_history,
 )
+from .metrics import KpiEvent, record_kpi_event
+from .models import User, Ticket as PolicyTicket
 
 
 AFFIRMATIVE_PATTERNS = [r"^네$", r"^예$", r"^넵$", r"^맞아요$", r"좋아요", r"진행", r"예약해", r"확정"]
@@ -83,6 +85,8 @@ def _determine_classified_intent(
     safety_result: dict | None,
     intent_result: dict | None,
 ) -> str:
+    if result_action in VALID_ACTIONS:
+        return result_action
     if classified_intent in VALID_ACTIONS:
         return classified_intent
 
@@ -103,9 +107,9 @@ def _determine_classified_intent(
         if category == "emergency":
             return "escalate"
         if category == "classification_error":
-            return result_action if result_action in VALID_ACTIONS else "clarify"
+            return "clarify"
 
-    return result_action if result_action in VALID_ACTIONS else "clarify"
+    return "clarify"
 
 
 def _compute_confidence(
@@ -122,18 +126,18 @@ def _compute_confidence(
     category = safety.get("category")
 
     if category and category != "safe":
-        score = 0.78
+        score = 0.85
         if category in {"medical_advice", "off_topic", "emergency"}:
-            score += 0.15
+            score += 0.14
         if safety.get("unsupported_department") or safety.get("unsupported_doctor"):
-            score += 0.04
+            score += 0.1
         if category == "classification_error":
-            score -= 0.2
+            score -= 0.25
         return _round_confidence(score)
 
-    score = 0.55
+    score = 0.6
     if classified_intent in VALID_ACTIONS:
-        score += 0.08
+        score += 0.1
     if intent.get("department"):
         score += 0.08
     if intent.get("date"):
@@ -148,13 +152,13 @@ def _compute_confidence(
 
     missing_info = intent.get("missing_info") or []
     if result_action == "clarify":
-        score -= 0.15
+        score -= 0.2
     if len(missing_info) >= 2:
-        score -= 0.05
-    if intent.get("error"):
         score -= 0.1
+    if intent.get("error"):
+        score -= 0.15
     if classified_intent != result_action and result_action in {"clarify", "reject", "escalate"}:
-        score -= 0.03
+        score -= 0.05
 
     return _round_confidence(score)
 
@@ -170,67 +174,62 @@ def _build_reasoning(
 ) -> str:
     safety = safety_result or {}
     intent = intent_result or {}
+    policy = policy_result or {}
     parts: list[str] = []
 
     if safety.get("unsupported_department"):
-        parts.append(f"지원하지 않는 분과({safety['unsupported_department']}) 감지")
-    elif safety.get("unsupported_doctor"):
-        parts.append(f"확인되지 않은 의료진({safety['unsupported_doctor']}) 감지")
-    else:
-        category = safety.get("category")
-        if category == "medical_advice":
-            parts.append("의료 상담 요청 감지")
-        elif category == "off_topic":
-            parts.append("예약 외 요청 또는 프롬프트 인젝션 감지")
-        elif category == "privacy_request":
-            parts.append("타 환자 개인정보 요청 감지")
-        elif category == "complaint":
-            parts.append("강한 불만 또는 상담원 연결 필요 요청 감지")
-        elif category == "operational_escalation":
-            parts.append("보험/비용 또는 의사 연락처 문의 감지")
-        elif category == "emergency":
-            parts.append("급성 통증 또는 응급 표현 감지")
-        elif category == "classification_error":
-            parts.append("안전성 판별 실패")
-        elif category == "safe":
-            parts.append("안전 게이트 통과")
+        parts.append(f"지원불가 분과({safety['unsupported_department']})")
+        parts.append(f"Safety Gate: {result_action}")
+        return ", ".join(parts)
+    if safety.get("unsupported_doctor"):
+        parts.append(f"미등록 의료진({safety['unsupported_doctor']})")
+        parts.append(f"Safety Gate: {result_action}")
+        return ", ".join(parts)
 
-    if not safety or safety.get("category") == "safe":
-        if customer_type:
-            parts.append(f"{customer_type} 환자")
-        if classified_intent:
-            parts.append(f"{classified_intent}로 분류")
+    category = safety.get("category", "safe")
+    if category != "safe":
+        reason_map = {
+            "medical_advice": "의료 상담 요청",
+            "off_topic": "예약 외 문의",
+            "privacy_request": "개인정보 요청",
+            "complaint": "불만/컴플레인",
+            "operational_escalation": "운영 문의",
+            "emergency": "응급 상황",
+            "classification_error": "분류 실패",
+        }
+        if reason_map.get(category):
+            parts.append(reason_map.get(category))
 
-        extracted = []
-        if intent.get("department"):
-            extracted.append(intent["department"])
-        if intent.get("date"):
-            extracted.append(intent["date"])
-        if intent.get("time"):
-            extracted.append(intent["time"])
-        if extracted:
-            parts.append("/".join(extracted) + " 정보 확인")
+        parts.append(f"Safety Gate: {result_action}")
+        return ", ".join(parts)
 
-        missing_info = intent.get("missing_info") or []
-        if missing_info:
-            parts.append("필수 정보 부족(" + ", ".join(missing_info) + ")")
+    parts.append("Safety Pass")
 
-        if policy_result is not None:
-            if policy_result.get("allowed"):
-                parts.append("정책 위반 없음")
-            else:
-                parts.append(policy_result.get("reason", "정책 재확인 필요"))
+    if customer_type:
+        type_map = {"new": "신규", "revisit": "재진"}
+        parts.append(f"저장소 이력 확인({type_map.get(customer_type, customer_type)})")
 
-    if result_action in {"reject", "escalate"} and safety.get("category") not in {None, "safe"}:
-        parts.append(f"safety gate에서 {result_action}")
-    elif result_action == "clarify":
-        parts.append("추가 확인 필요")
+    if classified_intent:
+        intent_map = {
+            "book_appointment": "예약",
+            "modify_appointment": "변경",
+            "cancel_appointment": "취소",
+            "check_appointment": "조회",
+        }
+        parts.append(f"의도: {intent_map.get(classified_intent, classified_intent)}")
 
-    ordered_parts: list[str] = []
-    for part in parts:
-        if part and part not in ordered_parts:
-            ordered_parts.append(part)
-    return ", ".join(ordered_parts) if ordered_parts else "판단 근거를 추가 확인 중입니다"
+    if policy.get("reason"):
+        parts.append(policy["reason"])
+    elif policy.get("allowed") is False:
+        parts.append("정책상 작업 거절")
+    elif policy.get("allowed") is True:
+        parts.append("정책 통과")
+
+    if result_action != classified_intent and result_action in {"clarify", "escalate", "reject"}:
+        action_map = {"clarify": "정보 확인", "escalate": "상담원 연결", "reject": "처리 불가"}
+        parts.append(f"최종 액션: {action_map.get(result_action, result_action)}")
+
+    return ", ".join(parts) if parts else "분류됨"
 
 
 def _build_runtime_fields(
@@ -243,6 +242,7 @@ def _build_runtime_fields(
     intent_result: dict | None,
     policy_result: dict | None,
     customer_type: str | None,
+    response: str,
 ) -> dict:
     resolved_classified_intent = _determine_classified_intent(
         result_action=result_action,
@@ -250,10 +250,18 @@ def _build_runtime_fields(
         safety_result=safety_result,
         intent_result=intent_result,
     )
+    final_action = result_action
+    if final_action not in VALID_ACTIONS:
+        final_action = resolved_classified_intent
+        if final_action not in VALID_ACTIONS:
+            final_action = "clarify"
+
     return {
         "ticket_id": (ticket or {}).get("ticket_id"),
         "classified_intent": resolved_classified_intent,
         "department": department,
+        "action": final_action,
+        "response": response,
         "confidence": _compute_confidence(
             result_action=result_action,
             classified_intent=resolved_classified_intent,
@@ -271,6 +279,7 @@ def _build_runtime_fields(
             customer_type=customer_type,
         ),
     }
+
 
 
 def _resolve_existing_appointment_from_ticket(
@@ -486,6 +495,7 @@ def _build_response_and_record(session_state: dict | None, **kwargs) -> dict:
             intent_result=intent_result,
             policy_result=policy_result,
             customer_type=customer_type,
+            response=result.get("response"),
         )
     )
     _record_history(session_state, "assistant", result.get("response", ""))
@@ -562,6 +572,8 @@ def _build_safety_response(
     category = safety_result.get("category")
     fallback_action = safety_result.get("fallback_action")
     fallback_message = safety_result.get("fallback_message")
+    
+    record_kpi_event(KpiEvent.SAFE_REJECT)
 
     if category == "emergency":
         return _build_response_and_record(
@@ -624,6 +636,7 @@ def _build_safety_response(
         )
 
     if category == "classification_error" and fallback_action == "clarify":
+        record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
         return _build_response_and_record(
             session_state,
             action="clarify",
@@ -654,6 +667,7 @@ def _build_unknown_entity_response(
     unsupported_doctor = safety_result.get("unsupported_doctor")
 
     if unsupported_department:
+        record_kpi_event(KpiEvent.SAFE_REJECT)
         return _build_response_and_record(
             session_state,
             action="reject",
@@ -664,6 +678,7 @@ def _build_unknown_entity_response(
         )
 
     if unsupported_doctor:
+        record_kpi_event(KpiEvent.SAFE_REJECT)
         return _build_response_and_record(
             session_state,
             action="reject",
@@ -684,6 +699,7 @@ def _build_department_guidance_response(
     safety_result: dict | None = None,
     customer_type: str | None = None,
 ) -> dict:
+    record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
     if department:
         return _build_response_and_record(
             session_state,
@@ -1036,6 +1052,7 @@ def _consume_pending_identity_input(
         if parsed_proxy is None:
             _increment_clarify_turn_count(session_state)
             if _should_escalate_for_clarify_limit(session_state, ["is_proxy_booking"]):
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
                 return (
                     _build_response_and_record(
                         session_state,
@@ -1048,6 +1065,7 @@ def _consume_pending_identity_input(
                     ),
                     None,
                 )
+            record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
             return (
                 _build_response_and_record(
                     session_state,
@@ -1112,6 +1130,7 @@ def _consume_pending_identity_input(
     if pending_missing_info:
         _increment_clarify_turn_count(session_state)
         if _should_escalate_for_clarify_limit(session_state, pending_missing_info):
+            record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
             return (
                 _build_response_and_record(
                     session_state,
@@ -1124,6 +1143,7 @@ def _consume_pending_identity_input(
                 ),
                 None,
             )
+        record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
         return (
             _build_response_and_record(
                 session_state,
@@ -1320,6 +1340,7 @@ def _handle_pending_confirmation(
             try:
                 persisted_booking = create_booking(appointment)
             except Exception:
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
                 return _build_response_and_record(
                     session_state,
                     action="clarify",
@@ -1339,6 +1360,7 @@ def _handle_pending_confirmation(
             appointment = persisted_booking
         message = build_success_message(action, department=appointment.get("department"), appointment=appointment, now=now)
         _clear_dialogue_state(session_state)
+        record_kpi_event(KpiEvent.AGENT_SUCCESS)
         return _build_response_and_record(
             session_state,
             action=action,
@@ -1352,6 +1374,7 @@ def _handle_pending_confirmation(
 
     if _is_negative(user_message):
         session_state["pending_confirmation"] = None
+        record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
         return _build_response_and_record(
             session_state,
             action="clarify",
@@ -1409,6 +1432,7 @@ def process_ticket(
     )
     user_message = ticket.get("message")
     if not user_message:
+        record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
         return _build_response_and_record(
             state,
             action="reject",
@@ -1452,6 +1476,7 @@ def process_ticket(
         selected_slot = _resolve_alternative_slot_selection(user_message, state["pending_alternative_slots"])
         if selected_slot is None:
             _increment_clarify_turn_count(state)
+            record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
             return _build_response_and_record(
                 state,
                 action="clarify",
@@ -1485,6 +1510,7 @@ def process_ticket(
         if selected_existing_appointment is None:
             _increment_clarify_turn_count(state)
             message = build_appointment_options_question(pending_action, state["pending_candidates"], now)
+            record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
             return _build_response_and_record(
                 state,
                 action="clarify",
@@ -1513,6 +1539,7 @@ def process_ticket(
         if intent_result.get("error"):
             fallback_action = intent_result.get("fallback_action")
             fallback_message = intent_result.get("fallback_message")
+            record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
             return _build_response_and_record(
                 state,
                 action=fallback_action if fallback_action in VALID_ACTIONS else "clarify",
@@ -1603,6 +1630,7 @@ def process_ticket(
     )
     if dialogue_missing_info:
         if _should_escalate_for_clarify_limit(state, dialogue_missing_info):
+            record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
             return _build_response_and_record(
                 state,
                 action="escalate",
@@ -1616,6 +1644,7 @@ def process_ticket(
             )
         _set_pending_missing_info(state, dialogue_missing_info)
         _increment_clarify_turn_count(state)
+        record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
         return _build_response_and_record(
             state,
             action="clarify",
@@ -1636,6 +1665,7 @@ def process_ticket(
         else:
             message = "예약 관련하여 더 자세한 정보가 필요합니다. 원하시는 날짜, 시간, 진료과를 알려주시겠어요?"
         _increment_clarify_turn_count(state)
+        record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
         return _build_response_and_record(
             state,
             action="clarify",
@@ -1667,6 +1697,7 @@ def process_ticket(
                 state["pending_candidates"] = candidates
                 state["pending_action"] = action
             message = build_appointment_options_question(action, candidates, now)
+            record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
             return _build_response_and_record(
                 state,
                 action="clarify",
@@ -1681,29 +1712,33 @@ def process_ticket(
         if len(candidates) == 1:
             target_existing_appointment = candidates[0]
 
-    intent_payload = {
-        **intent_result,
-        "action": action,
-        "customer_name": effective_customer_name,
-        "patient_name": effective_patient_name,
-        "patient_contact": effective_patient_contact,
-        "is_proxy_booking": effective_proxy_booking,
-        "birth_date": effective_birth_date,
-        "department": department,
-        "date": merged_slots.get("date"),
-        "time": merged_slots.get("time"),
-        "booking_time": booking_time or ticket.get("booking_time"),
-        "customer_type": customer_type,
-    }
+    history = _resolve_history_customer_type(effective_customer_name, effective_birth_date, effective_patient_contact)
+    customer_type = history.get("customer_type", "new")
+    
+    policy_ticket = PolicyTicket(
+        intent=action,
+        user=User(
+            patient_id=ticket.get("customer_id") or "unknown",
+            name=effective_customer_name,
+            is_first_visit=(customer_type == "new")
+        ),
+        context={
+            "appointment_time": booking_time,
+            "booking_id": (target_existing_appointment or {}).get("id"),
+            "new_appointment_time": booking_time,
+        },
+    )
 
-    policy_result = apply_policy(intent_payload, target_existing_appointment, all_appointments, now)
+    policy_result = apply_policy(policy_ticket, all_appointments, now)
 
-    if not policy_result["allowed"]:
-        recommended_action = policy_result.get("recommended_action")
-        message = policy_result["reason"]
-        alternatives = policy_result.get("alternative_slots") or []
+    if not policy_result.action.value.endswith("appointment"):
+        message = policy_result.message
+        recommended_action = policy_result.action.value
+        alternatives = policy_result.suggested_slots
+
         if alternatives and is_chat and recommended_action == "clarify":
             if _should_escalate_for_clarify_limit(state, ["slot_selection"]):
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
                 return _build_response_and_record(
                     state,
                     action="escalate",
@@ -1712,13 +1747,14 @@ def process_ticket(
                     ticket=ticket,
                     classified_intent=classified_intent,
                     safety_result=safety_result,
-                    intent_result=intent_payload,
-                    policy_result=policy_result,
+                    intent_result=intent_result,
+                    policy_result={"reason": message, "allowed": False},
                     customer_type=customer_type,
                 )
             state["pending_alternative_slots"] = alternatives
             _set_pending_missing_info(state, ["slot_selection"])
             _increment_clarify_turn_count(state)
+            record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
             return _build_response_and_record(
                 state,
                 action="clarify",
@@ -1727,52 +1763,26 @@ def process_ticket(
                 ticket=ticket,
                 classified_intent=classified_intent,
                 safety_result=safety_result,
-                intent_result={**intent_payload, "missing_info": ["slot_selection"]},
-                policy_result=policy_result,
+                intent_result={**intent_result, "missing_info": ["slot_selection"]},
+                policy_result={"reason": message, "allowed": False},
                 customer_type=customer_type,
             )
         if alternatives:
             message = f"{message} 가능한 다른 시간은 {', '.join(alternatives)} 입니다."
 
-        if recommended_action == "clarify":
-            _increment_clarify_turn_count(state)
-            return _build_response_and_record(
-                state,
-                action="clarify",
-                message=message,
-                department=department,
-                ticket=ticket,
-                classified_intent=classified_intent,
-                safety_result=safety_result,
-                intent_result=intent_payload,
-                policy_result=policy_result,
-                customer_type=customer_type,
-            )
-
-        if recommended_action == "escalate":
-            return _build_response_and_record(
-                state,
-                action="escalate",
-                message=message,
-                department=department,
-                ticket=ticket,
-                classified_intent=classified_intent,
-                safety_result=safety_result,
-                intent_result=intent_payload,
-                policy_result=policy_result,
-                customer_type=customer_type,
-            )
+        event = KpiEvent.AGENT_SOFT_FAIL_CLARIFY if recommended_action == "clarify" else KpiEvent.AGENT_HARD_FAIL
+        record_kpi_event(event)
 
         return _build_response_and_record(
             state,
-            action="reject",
+            action=recommended_action,
             message=message,
             department=department,
             ticket=ticket,
             classified_intent=classified_intent,
             safety_result=safety_result,
-            intent_result=intent_payload,
-            policy_result=policy_result,
+            intent_result=intent_result,
+            policy_result={"reason": message, "allowed": False},
             customer_type=customer_type,
         )
 
@@ -1793,6 +1803,7 @@ def process_ticket(
             state["pending_confirmation"] = {"action": "book_appointment", "appointment": appointment}
         _set_pending_missing_info(state, [])
         message = build_confirmation_question(appointment, now)
+        record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
         return _build_response_and_record(
             state,
             action="clarify",
@@ -1801,8 +1812,8 @@ def process_ticket(
             ticket=ticket,
             classified_intent=classified_intent,
             safety_result=safety_result,
-            intent_result=intent_payload,
-            policy_result=policy_result,
+            intent_result=intent_result,
+            policy_result={"allowed": True},
             customer_type=customer_type,
         )
 
@@ -1814,6 +1825,7 @@ def process_ticket(
     }
     message = build_success_message(action, department=department, appointment=success_reference, now=now)
     _clear_dialogue_state(state)
+    record_kpi_event(KpiEvent.AGENT_SUCCESS)
     return _build_response_and_record(
         state,
         action=action,
@@ -1822,8 +1834,8 @@ def process_ticket(
         ticket=ticket,
         classified_intent=classified_intent,
         safety_result=safety_result,
-        intent_result=intent_payload,
-        policy_result=policy_result,
+        intent_result=intent_result,
+        policy_result={"allowed": True},
         customer_type=customer_type,
     )
 

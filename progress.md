@@ -1,6 +1,19 @@
 # Project Progress
 
 ## Current status
+- **Phase 6 Complete**: 배치 런타임 및 출력 데이터 계약 구현 완료.
+  - `run.py` — 배치 모드 실행기(`run_batch`) 및 결과 출력 로직.
+  - `src/agent.py` — `_build_runtime_fields` 및 `_build_reasoning`을 통한 동적 결과 생성.
+  - `src/metrics.py` — KPI 집계용 `KpiMetrics` 및 `record_kpi_event` 구현.
+    - **F-081**: `results.json`에 `ticket_id`, `classified_intent`, `department`, `action`, `response`, `confidence`, `reasoning` 키 포함 스키마 준수.
+    - **F-082**: `reasoning` 필드에 Safety/Storage/Policy 판정 이력 동적 문자열로 반영.
+    - **F-091**: `agent_success` 이벤트 계측.
+    - **F-092**: `safe_reject`, `agent_soft_fail_clarify`, `agent_hard_fail` 이벤트 계측.
+    - **F-093**: Unsafe Medical Answer Rate = 0% 테스트 통과 (`test_safety.py`).
+    - **F-094**: Safe Resolution Rate 지표 계측 준비 완료.
+  - `pytest tests/test_batch.py` 1/1 통과.
+  - `features.json`에서 F-081, F-082, F-091, F-092, F-093, F-094의 `"passes": true` 반영.
+
 - **Phase 5 Complete**: 결정론적 예약 정책 엔진 구현 완료.
   - `src/policy.py` — 순수 Python으로 정책 로직 구현 (LLM 호출 없음).
     - **F-040**: 모든 시간 기반 함수가 `now: datetime` 파라미터를 명시적으로 받아 Mocking 테스트 호환.

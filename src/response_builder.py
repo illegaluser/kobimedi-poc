@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from .policy import DOCTOR_DEPARTMENT_MAP
+from .classifier import SUPPORTED_DOCTORS
 
 
+DOCTOR_DEPARTMENT_MAP = SUPPORTED_DOCTORS
 DEPARTMENT_DOCTOR_MAP = {department: doctor for doctor, department in DOCTOR_DEPARTMENT_MAP.items()}
 
 

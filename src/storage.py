@@ -433,7 +433,7 @@ def _build_customer_type_result(
     )
 
     return {
-        "customer_type": None if ambiguous else ("재진" if has_non_cancelled_history else "초진"),
+        "customer_type": None if ambiguous else ("revisit" if has_non_cancelled_history else "new"),
         "ambiguous": ambiguous,
         "birth_date_candidates": birth_date_candidates or [],
         "matched_bookings": matched_bookings if not ambiguous else [],

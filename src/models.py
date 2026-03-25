@@ -43,10 +43,10 @@ class Ticket:
 @dataclass
 class Booking:
     booking_id: str
-    patient_id: str
+    customer_name: str
     patient_name: str
-    start_time: datetime
-    end_time: datetime
+    department: str
+    booking_time: str
     is_first_visit: bool
 
 
