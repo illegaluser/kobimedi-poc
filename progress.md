@@ -1,6 +1,22 @@
 # Project Progress
 
 ## Current status
+- **Phase 4 Complete**: 멀티턴 대화 상태머신 및 본인/대리인 검증 구현 완료.
+  - `src/agent.py` — 멀티턴 대화 상태머신 완성:
+    - **F-031**: 예약 의도 확정 시 `is_proxy_booking=None`이면 "본인이신가요?" clarify 우선 발행. 슬롯(날짜/시간) 수집보다 선행.
+    - **F-032**: 본인(`is_proxy_booking=False`) 확인 후 본인 성명+연락처 수집, ticket.customer_name은 힌트로만 사용.
+    - **F-033**: 대리인(`is_proxy_booking=True`) 확인 후 **환자 본인**의 성명+연락처를 별도 수집; 확보 전 예약 진행 금지.
+    - **F-041**: `pending_missing_info_queue` 리스트로 누락 필드 관리; 이미 채워진 슬롯 재질문 금지.
+    - **F-042**: `clarify_turn_count` 4 초과 시 핵심 정보 미확보 → `escalate` 강제 전환.
+    - **F-043**: `accumulated_slots`(date/time/dept) + `is_proxy_booking`, `patient_contact` 세션 내 유지.
+    - **F-044**: 매 턴 전체 누적 상태 기반 action 재평가.
+    - **F-045**: 슬롯 불가 시 `pending_alternative_slots` 상태로 전환, 선택 대기.
+    - **F-046**: `pending_confirmation=True` 상태로 "예약할까요?" 물은 뒤 "네" 응답 시에만 `create_booking()` 호출(영속화).
+    - **F-047**: clarify-first 원칙 — 복구 가능한 불확실성은 escalate 전 clarify로 처리.
+    - **F-048**: `chat.py`·`run.py` 모두 `src/agent.py` 동일 로직 공유 검증.
+  - `pytest tests/test_dialogue.py` 9/9 통과.
+  - `features.json`에서 F-031~F-033, F-041~F-048의 `"passes": true` 반영.
+
 - **Phase 3 Complete**: 의도 분류 및 정보 추출 로직 구현 완료.
   - `src/classifier.py` — `classify_intent()` 완성:
     - **F-011**: 7개 action enum 엄수 (`_normalize_action_value` 검증, 무효값 → rule fallback).
@@ -50,7 +66,7 @@
   - `features.json`에서 F-034, F-035, F-036, F-037, F-038, F-039, F-061, F-062, F-063, F-064, F-065, F-066, F-067의 `"passes": true` 반영.
 
 ## Next step
-- **Proceed to Phase 4**: Dialogue State Machine & Policy Engine 완성.
-  - `src/policy.py` 결정론적 정책 검사 (24시간 규칙, 정원, 운영시간) 완성 검증 및 테스트.
-  - 멀티턴 대화 흐름: 본인/대리인 확인(F-031), 누락 정보 수집 큐(F-041), clarify_turn_count 상한(F-042) 테스트 보강.
+- **Proceed to Phase 5**: 골든 평가 및 최종 문서화.
   - `golden_eval/eval.py` 실행 및 Safe Resolution Rate >= 70% 검증.
+  - `docs/q1_metric_rubric.md`, `docs/q3_safety.md`, `docs/final_report.md` 최신화 (F-101~F-103).
+  - 잔여 policy 결정론 테스트(`tests/test_policy.py`) 커버리지 보강 (F-051~F-057).
