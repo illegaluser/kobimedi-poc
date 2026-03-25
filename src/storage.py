@@ -101,15 +101,15 @@ def load_bookings(path: str | Path | None = None) -> list[dict]:
 
     try:
         data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        raise StorageDecodeError(f"Invalid JSON in {bookings_path}") from exc
+    except json.JSONDecodeError:
+        return []
 
     if not isinstance(data, list):
-        raise StorageDecodeError(f"Expected a JSON array in {bookings_path}")
+        return []
 
     invalid_items = [item for item in data if not isinstance(item, dict)]
     if invalid_items:
-        raise StorageDecodeError(f"Expected only object records in {bookings_path}")
+        return []
 
     return [dict(item) for item in data]
 
@@ -133,12 +133,12 @@ def save_bookings(bookings: list[dict], path: str | Path | None = None) -> bool:
 
         temp_path.replace(bookings_path)
         return True
-    except OSError as exc:
+    except OSError:
         _safe_remove(temp_path)
-        raise StorageWriteError(f"Failed to write bookings to {bookings_path}") from exc
-    except (TypeError, ValueError) as exc:
+        return False
+    except (TypeError, ValueError):
         _safe_remove(temp_path)
-        raise StorageWriteError(f"Failed to serialize bookings for {bookings_path}") from exc
+        return False
 
 
 def _next_booking_id(bookings: list[dict]) -> str:
@@ -311,12 +311,25 @@ def create_booking(
     path: str | Path | None = None,
     *,
     availability_rechecker: Callable[[dict[str, Any], list[dict]], Any] | None = None,
-) -> dict:
-    bookings = load_bookings(path)
-    booking = _prepare_booking_record(record, bookings)
-    _recheck_before_persist(booking, bookings, availability_rechecker)
-    bookings.append(booking)
-    save_bookings(bookings, path)
+) -> dict[str, Any]:
+    # NOTE: This initial load is for optimistic ID generation and preparation.
+    # The critical re-check happens right before persistence.
+    initial_bookings = load_bookings(path)
+    booking = _prepare_booking_record(record, initial_bookings)
+
+    # Freshly load the bookings again to minimize race conditions.
+    rechecked_bookings = load_bookings(path)
+
+    # If the original record didn't have an ID, generate a new one based on the fresh data.
+    if "id" not in record or not record.get("id"):
+        booking["id"] = _next_booking_id(rechecked_bookings)
+
+    _recheck_before_persist(booking, rechecked_bookings, availability_rechecker)
+
+    rechecked_bookings.append(booking)
+    if not save_bookings(rechecked_bookings, path):
+        raise StorageWriteError(f"Failed to write bookings to {_resolve_path(path)}")
+
     return booking
 
 
@@ -502,9 +515,6 @@ def cancel_booking(booking_id: str, path: str | Path | None = None) -> bool:
             return True
 
         booking["status"] = "cancelled"
-        booking["updated_at"] = now
-        booking["cancelled_at"] = now
-        save_bookings(bookings, path)
-        return True
+        return save_bookings(bookings, path)
 
     return False

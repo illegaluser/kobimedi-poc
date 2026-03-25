@@ -1,0 +1,69 @@
+{
+    "features": [
+        {
+            "id": "F-034",
+            "description": "환자 식별 시 이름보다 전화번호를 우선적으로 사용",
+            "passes": true
+        },
+        {
+            "id": "F-035",
+            "description": "resolve_customer_type_from_history가 전화번호를 우선적으로 사용하도록 확장",
+            "passes": true
+        },
+        {
+            "id": "F-036",
+            "description": "신규 예약 생성 시 id 필드 포함 (uuid/순차생성)",
+            "passes": true
+        },
+        {
+            "id": "F-037",
+            "description": "신규 예약 생성 시 patient_name, patient_contact 필드 포함",
+            "passes": true
+        },
+        {
+            "id": "F-038",
+            "description": "신규 예약 생성 시 is_proxy_booking, booking_time, department, customer_type, status 필드 포함",
+            "passes": true
+        },
+        {
+            "id": "F-039",
+            "description": "신규 예약 생성 시 status는 active/cancelled 값 가짐",
+            "passes": true
+        },
+        {
+            "id": "F-061",
+            "description": "모든 상태 검증은 bookings.json을 진실원천으로 사용",
+            "passes": true
+        },
+        {
+            "id": "F-062",
+            "description": "find_bookings()에 patient_contact 필터 추가",
+            "passes": true
+        },
+        {
+            "id": "F-063",
+            "description": "resolve_customer_type_from_history()가 이름이 아닌 전화번호 우선으로 환자 식별",
+            "passes": true
+        },
+        {
+            "id": "F-064",
+            "description": "예약 최종 확정 직전에 저장소를 다시 읽어(recheck) 정원 검증 (동시성 방어)",
+            "passes": true
+        },
+        {
+            "id": "F-065",
+            "description": "load_bookings()는 JSONDecodeError나 파일 미존재 시 빈 배열 반환, save_bookings()는 쓰기 실패 시 False 반환",
+            "passes": true
+        },
+        {
+            "id": "F-066",
+            "description": "create_booking() 시 필수 필드(id, patient_name, patient_contact 등) 레코드에 포함",
+            "passes": true
+        },
+        {
+            "id": "F-067",
+            "description": "ticket.context는 보조 힌트로만 사용하고 bookings.json을 기준으로 최종 판단",
+            "passes": true
+        }
+    ]
+}

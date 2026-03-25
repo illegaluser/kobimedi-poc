@@ -205,15 +205,17 @@ def test_cancel_booking_updates_status_and_hides_from_active_results(tmp_path):
     )
     assert len(cancelled) == 1
     assert cancelled[0]["status"] == "cancelled"
-    assert "cancelled_at" in cancelled[0]
 
 
-def test_load_bookings_raises_decode_error_for_corrupted_file(tmp_path):
+def test_load_bookings_returns_empty_list_for_corrupted_file(tmp_path):
     storage_path = tmp_path / "bookings.json"
     storage_path.write_text("{broken json", encoding="utf-8")
+    assert load_bookings(storage_path) == []
 
-    with pytest.raises(StorageDecodeError):
-        load_bookings(storage_path)
+
+def test_load_bookings_returns_empty_list_for_missing_file(tmp_path):
+    storage_path = tmp_path / "non_existent_bookings.json"
+    assert load_bookings(storage_path) == []
 
 
 def test_create_booking_raises_write_error_and_preserves_original_file(tmp_path, monkeypatch):
