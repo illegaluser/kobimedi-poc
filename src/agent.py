@@ -206,7 +206,7 @@ def _build_reasoning(
     parts.append("Safety Pass")
 
     if customer_type:
-        type_map = {"new": "신규", "revisit": "재진"}
+        type_map = {"new": "신규", "revisit": "재진", "초진": "신규", "재진": "재진"}
         parts.append(f"저장소 이력 확인({type_map.get(customer_type, customer_type)})")
 
     if classified_intent:
@@ -1051,6 +1051,21 @@ def _consume_pending_identity_input(
     if not pending_missing_info:
         return None, None
 
+    # Intent-switch detection: if the user clearly requests a *different*
+    # booking-related action while we are mid-flow collecting identity info,
+    # reset all pending state and let the main flow re-classify from scratch.
+    # This allows switching from e.g. cancel → book or book → cancel naturally.
+    current_pending_action = session_state.get("pending_action")
+    if current_pending_action in BOOKING_RELATED_ACTIONS:
+        inferred_switch = _infer_requested_action(user_message)
+        if (
+            inferred_switch is not None
+            and inferred_switch in BOOKING_RELATED_ACTIONS
+            and inferred_switch != current_pending_action
+        ):
+            _reset_pending_flow_for_new_action(session_state, inferred_switch)
+            return None, None
+
     identity_missing = any(
         field in pending_missing_info
         for field in ["is_proxy_booking", "patient_name", "patient_contact", "customer_name", "birth_date"]
@@ -1595,11 +1610,14 @@ def process_ticket(
             action = pending_action
         elif inferred_action in {"cancel_appointment", "modify_appointment", "check_appointment"}:
             action = inferred_action
-        elif inferred_action == "book_appointment":
-            # Bug fix (F-031, F-042): Always upgrade to book_appointment when user
-            # clearly requests booking, even without slots yet.  Previously the
-            # `has_booking_slots` guard prevented the proxy question from being asked
-            # when the first message contained no date/time (e.g. "예약할래요").
+        elif inferred_action == "book_appointment" and (is_chat or has_booking_slots):
+            # Bug fix (F-031, F-042): In chat mode, always upgrade to book_appointment
+            # when user clearly requests booking even without slots yet (e.g. "예약할래요")
+            # so the proxy question is asked on the first turn.
+            # In batch mode (is_chat=False), only upgrade when at least one booking slot
+            # (department/date/time) is already present in the classified intent — this
+            # continues a concrete booking flow while keeping the generic
+            # "더 자세한 정보가 필요합니다" message for fully under-specified requests.
             action = inferred_action
 
     previous_pending_action = (state or {}).get("pending_action")
@@ -1748,7 +1766,7 @@ def process_ticket(
         user=User(
             patient_id=ticket.get("customer_id") or "unknown",
             name=effective_customer_name,
-            is_first_visit=(customer_type == "new")
+            is_first_visit=(customer_type not in {"재진", "revisit"}),
         ),
         context={
             "appointment_time": booking_time,
