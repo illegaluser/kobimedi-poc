@@ -431,7 +431,7 @@ def is_change_allowed(appointment_time_str: str | datetime, now: datetime) -> bo
         return False
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
-    return now <= (appointment_time - timedelta(hours=24))
+    return (appointment_time - now).total_seconds() >= 86400
 
 
 def check_hourly_capacity(
