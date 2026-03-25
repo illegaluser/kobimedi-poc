@@ -310,5 +310,35 @@
     "status": "active",
     "created_at": "2026-03-25T17:10:52.108587+00:00",
     "updated_at": "2026-03-25T17:10:52.108587+00:00"
+  },
+  {
+    "customer_name": "홍길동",
+    "patient_name": "홍길동",
+    "patient_contact": "010-1111-2222",
+    "is_proxy_booking": false,
+    "department": "이비인후과",
+    "date": "2026-03-27",
+    "time": "11:00",
+    "booking_time": "2026-03-27T11:00:00+09:00",
+    "customer_type": "재진",
+    "id": "booking-022",
+    "status": "active",
+    "created_at": "2026-03-25T17:52:34.556261+00:00",
+    "updated_at": "2026-03-25T17:52:34.556261+00:00"
+  },
+  {
+    "customer_name": "박철수",
+    "patient_name": "정형외",
+    "patient_contact": "010-5555-6666",
+    "is_proxy_booking": false,
+    "department": "정형외과",
+    "date": "2026-03-27",
+    "time": "16:30",
+    "booking_time": "2026-03-27T16:30:00+09:00",
+    "customer_type": "초진",
+    "id": "booking-023",
+    "status": "active",
+    "created_at": "2026-03-25T17:52:42.032053+00:00",
+    "updated_at": "2026-03-25T17:52:42.032053+00:00"
   }
 ]
