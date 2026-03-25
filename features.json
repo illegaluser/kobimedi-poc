@@ -1,69 +1,681 @@
 {
-    "features": [
-        {
-            "id": "F-034",
-            "description": "환자 식별 시 이름보다 전화번호를 우선적으로 사용",
-            "passes": true
-        },
-        {
-            "id": "F-035",
-            "description": "resolve_customer_type_from_history가 전화번호를 우선적으로 사용하도록 확장",
-            "passes": true
-        },
-        {
-            "id": "F-036",
-            "description": "신규 예약 생성 시 id 필드 포함 (uuid/순차생성)",
-            "passes": true
-        },
-        {
-            "id": "F-037",
-            "description": "신규 예약 생성 시 patient_name, patient_contact 필드 포함",
-            "passes": true
-        },
-        {
-            "id": "F-038",
-            "description": "신규 예약 생성 시 is_proxy_booking, booking_time, department, customer_type, status 필드 포함",
-            "passes": true
-        },
-        {
-            "id": "F-039",
-            "description": "신규 예약 생성 시 status는 active/cancelled 값 가짐",
-            "passes": true
-        },
-        {
-            "id": "F-061",
-            "description": "모든 상태 검증은 bookings.json을 진실원천으로 사용",
-            "passes": true
-        },
-        {
-            "id": "F-062",
-            "description": "find_bookings()에 patient_contact 필터 추가",
-            "passes": true
-        },
-        {
-            "id": "F-063",
-            "description": "resolve_customer_type_from_history()가 이름이 아닌 전화번호 우선으로 환자 식별",
-            "passes": true
-        },
-        {
-            "id": "F-064",
-            "description": "예약 최종 확정 직전에 저장소를 다시 읽어(recheck) 정원 검증 (동시성 방어)",
-            "passes": true
-        },
-        {
-            "id": "F-065",
-            "description": "load_bookings()는 JSONDecodeError나 파일 미존재 시 빈 배열 반환, save_bookings()는 쓰기 실패 시 False 반환",
-            "passes": true
-        },
-        {
-            "id": "F-066",
-            "description": "create_booking() 시 필수 필드(id, patient_name, patient_contact 등) 레코드에 포함",
-            "passes": true
-        },
-        {
-            "id": "F-067",
-            "description": "ticket.context는 보조 힌트로만 사용하고 bookings.json을 기준으로 최종 판단",
-            "passes": true
-        }
-    ]
+  "version": "2.1",
+  "last_updated": "2026-03-25",
+  "description": "코비메디 예약 Agent PoC — 기능 정의 및 구현 체크리스트",
+  "groups": {
+    "safety":           "안전 게이트 및 하드 제약 (최우선)",
+    "classification":   "의도 분류 및 액션 선택",
+    "extraction":       "정보 추출 (날짜/시간/분과/환자정보)",
+    "patient_identity": "환자 식별 및 초진/재진 판정",
+    "dialogue":         "멀티턴 대화 상태머신",
+    "policy":           "예약 정책 결정론 검사 (LLM 위임 금지)",
+    "storage":          "저장소 진실원천 관리",
+    "calcom":           "Q4 cal.com 연동 (선택)",
+    "output":           "출력 계약 및 형식",
+    "metrics":          "KPI/제약 지표 계측",
+    "docs":             "문서 산출물"
+  },
+  "features": [
+    {
+      "id": "F-001",
+      "group": "safety",
+      "title": "Safety gate 파이프라인 최선행",
+      "description": "safety gate는 classification/extraction/policy 전에 무조건 실행된다. pipeline 순서: 1-safety → 2-classification → ...",
+      "policy_ref": "policy_digest §0.3, §4",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_safety.py"
+    },
+    {
+      "id": "F-002",
+      "group": "safety",
+      "title": "의료 상담 즉시 reject",
+      "description": "증상 진단, 약물 추천, 치료법 안내, 검사결과 해석 등 의료 판단 요청은 즉시 reject. Unsafe Medical Answer Rate = 0%.",
+      "policy_ref": "policy_digest §4.1",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_safety.py"
+    },
+    {
+      "id": "F-003",
+      "group": "safety",
+      "title": "목적 외 사용(잡담/타서비스) reject",
+      "description": "날씨, 뉴스, 타 병원 추천 등 예약과 무관한 요청은 즉시 reject.",
+      "policy_ref": "policy_digest §4.2",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_safety.py"
+    },
+    {
+      "id": "F-004",
+      "group": "safety",
+      "title": "프롬프트 인젝션 reject",
+      "description": "시스템 프롬프트 요청, 역할 변경 시도, 규칙 무시 지시 등 인젝션 패턴 탐지 후 reject.",
+      "policy_ref": "policy_digest §4.1",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_safety.py"
+    },
+    {
+      "id": "F-005",
+      "group": "safety",
+      "title": "타 환자 개인정보 요청 reject",
+      "description": "다른 환자의 예약/개인정보 조회 시도는 즉시 reject.",
+      "policy_ref": "policy_digest §4.1",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-006",
+      "group": "safety",
+      "title": "의료+예약 혼합 요청 분리 처리",
+      "description": "의료 판단 부분은 거부하고, 예약 가능한 하위 요청만 후속 처리. 분리 불가 시 전체 reject.",
+      "policy_ref": "policy_digest §4.3",
+      "priority": 2,
+      "status": "required",
+      "test_ref": "tests/test_safety.py"
+    },
+    {
+      "id": "F-007",
+      "group": "safety",
+      "title": "증상 기반 분과 안내 (진단 아님)",
+      "description": "증상 키워드 기반 분과 추천은 허용하나, 질병명 추정·치료법·검사 필요성 단정은 금지.",
+      "policy_ref": "policy_digest §4.4, §8.5",
+      "priority": 2,
+      "status": "required",
+      "test_ref": "tests/test_safety.py"
+    },
+    {
+      "id": "F-008",
+      "group": "safety",
+      "title": "급성 통증/응급 상황 escalate",
+      "description": "급성 통증, 출혈, 호흡 곤란 등 응급 표현 감지 시 즉시 escalate. 챗봇이 직접 당일 예약 확정 금지.",
+      "policy_ref": "policy_digest §4.2, §3.3",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_safety.py"
+    },
+    {
+      "id": "F-009",
+      "group": "safety",
+      "title": "화난 고객 / 상담원 요청 escalate",
+      "description": "2회 이상 불만 표현, 명시적 상담원 요청 시 escalate.",
+      "policy_ref": "policy_digest §4.2, §10",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-010",
+      "group": "safety",
+      "title": "의사 개인정보/보험비용 escalate",
+      "description": "의사 전화번호·개인정보 요청, 보험·MRI 비용 등 구체적 운영 정보 문의는 escalate.",
+      "policy_ref": "policy_digest §4.2, §10",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-011",
+      "group": "classification",
+      "title": "7개 action enum 준수",
+      "description": "book_appointment / modify_appointment / cancel_appointment / check_appointment / clarify / escalate / reject 외 값 반환 금지.",
+      "policy_ref": "policy_digest §2.2, AGENTS.md rule 2",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_classifier.py"
+    },
+    {
+      "id": "F-012",
+      "group": "classification",
+      "title": "불확실 의도 → clarify 폴백",
+      "description": "어떤 action으로도 확신할 수 없으면 clarify로 폴백한다. 추측 금지.",
+      "policy_ref": "policy_digest §2.2",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_classifier.py"
+    },
+    {
+      "id": "F-013",
+      "group": "classification",
+      "title": "confidence/reasoning 계산값 (하드코딩 금지)",
+      "description": "confidence는 실제 safety/extraction/policy/storage 결과를 반영한 계산값. 0.95 등 고정값 금지.",
+      "policy_ref": "policy_digest §12.1, AGENTS.md rule 9",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_batch.py"
+    },
+    {
+      "id": "F-014",
+      "group": "classification",
+      "title": "classified_intent vs action 의미 구분",
+      "description": "classified_intent는 해석된 의도 라벨, action은 시스템이 실제 취한 최종 동작. 둘이 다를 수 있음(예: 의도는 book이지만 action은 clarify).",
+      "policy_ref": "policy_digest §12.1",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-021",
+      "group": "extraction",
+      "title": "날짜/시간 추출",
+      "description": "상대 표현(내일, 다음 주 월요일 등) 포함 날짜·시간 추출. timestamp 기준 상대 해석.",
+      "policy_ref": "policy_digest §6.1",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_classifier.py"
+    },
+    {
+      "id": "F-022",
+      "group": "extraction",
+      "title": "진료 분과 추출",
+      "description": "이비인후과/내과/정형외과 또는 담당 의사명 기반 분과 추출.",
+      "policy_ref": "policy_digest §6.1",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-023",
+      "group": "extraction",
+      "title": "환자 성명 추출 (자유문장)",
+      "description": "메시지 또는 context에서 환자 본인/대리 예약 대상 이름 추출. ticket.customer_name은 힌트로만 사용.",
+      "policy_ref": "policy_digest §6.1, §0.2",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-024",
+      "group": "extraction",
+      "title": "환자 전화번호 추출 (자유문장)",
+      "description": "메시지에서 전화번호 패턴(010-xxxx-xxxx 등) 추출. 추출 실패 시 clarify 단계에서 별도 수집.",
+      "policy_ref": "policy_digest §5.6, §6.1, §6.4",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-025",
+      "group": "extraction",
+      "title": "생년월일 추출 (보조 식별자)",
+      "description": "동명이인 해소용 생년월일 추출. 전화번호 미확보 또는 충돌 시에만 요청.",
+      "policy_ref": "policy_digest §6.1, §6.4",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-026",
+      "group": "extraction",
+      "title": "대리 예약 감지 (메시지 패턴)",
+      "description": "메시지에서 '엄마를 대신해서', '아버지 예약', '가족 대신' 등 명시적 대리 표현 감지. 감지 즉시 proxy_booking=true로 전환.",
+      "policy_ref": "policy_digest §6.3",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-027",
+      "group": "extraction",
+      "title": "응급/급성 통증 신호 추출",
+      "description": "is_emergency 플래그 추출. 급성, 지금 너무 아파, 응급 등 키워드 기반.",
+      "policy_ref": "policy_digest §4.2",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-028",
+      "group": "extraction",
+      "title": "기존 예약 참조 추출",
+      "description": "변경/취소/확인 요청 시 기존 예약 식별 힌트(날짜, 분과, 예약번호) 추출.",
+      "policy_ref": "policy_digest §6.1, §9",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-029",
+      "group": "extraction",
+      "title": "증상 키워드 추출 → 분과 추천",
+      "description": "증상 기반 분과 매핑 테이블을 이용한 안내. 진단·질병명 확정 금지.",
+      "policy_ref": "policy_digest §8.5",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-030",
+      "group": "extraction",
+      "title": "customer_type 힌트 수용 (최종은 저장소)",
+      "description": "ticket.customer_type은 추출 힌트로만 사용. 초진/재진 최종 판정은 저장소에서.",
+      "policy_ref": "policy_digest §0.2, §7.2",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-031",
+      "group": "patient_identity",
+      "title": "예약 시작 시 본인/대리인 여부 확인 ★",
+      "description": "예약 절차 첫 단계에서 '예약하시는 분이 환자 본인이신가요, 아니면 가족/지인을 대신하여 예약하시는 건가요?'를 명시적으로 물어본다. 성명과 전화번호만으로는 본인/대리인을 구분할 수 없으므로 이 확인이 선행되어야 한다. 본인이면 본인 정보 수집, 대리인이면 환자 본인 정보 별도 수집.",
+      "policy_ref": "policy_digest §5.6, §6.3, §6.5(신규)",
+      "priority": 1,
+      "status": "required",
+      "impl_note": "dialogue state에 is_proxy_booking 플래그 추가. chat 모드: 첫 예약 의도 확정 후 즉시 질문. batch 모드: 메시지에서 대리 표현이 없으면 본인으로 간주하되 대리 표현 감지 시 F-026과 연계."
+    },
+    {
+      "id": "F-032",
+      "group": "patient_identity",
+      "title": "본인 예약 시 본인 성명+전화번호 수집",
+      "description": "is_proxy_booking=false인 경우, 사용자가 직접 입력하는 성명과 전화번호를 환자 식별값으로 사용. ticket.customer_name은 힌트로만 사용.",
+      "policy_ref": "policy_digest §5.6, §6.1",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-033",
+      "group": "patient_identity",
+      "title": "대리 예약 시 환자 본인 성명+전화번호 수집",
+      "description": "is_proxy_booking=true인 경우, 예약을 요청하는 사람(대리인)이 아닌 실제 진료 받을 환자 본인의 성명과 전화번호를 별도로 수집한다. 확보 전 예약 진행 금지.",
+      "policy_ref": "policy_digest §6.3, request.md §2.5",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-034",
+      "group": "patient_identity",
+      "title": "전화번호 우선 환자 식별",
+      "description": "환자 식별 우선순위: ① patient_contact(전화번호) → ② 이름+생년월일 → ③ 이름 단독(저장소상 유일할 때만). storage.find_bookings()가 patient_contact 필터를 지원해야 함.",
+      "policy_ref": "policy_digest §5.6, §6.4, §7.4",
+      "priority": 1,
+      "status": "required",
+      "impl_note": "storage.py find_bookings()에 patient_contact 파라미터 추가 필요"
+    },
+    {
+      "id": "F-035",
+      "group": "patient_identity",
+      "title": "초진/재진 저장소 판정",
+      "description": "동일 전화번호로 active/non-cancelled 이력 → 재진. 이력 없거나 전부 cancelled → 초진. ticket.customer_type은 참고값.",
+      "policy_ref": "policy_digest §7.3",
+      "priority": 1,
+      "status": "required",
+      "impl_note": "storage.resolve_customer_type_from_history()를 patient_contact 우선으로 확장"
+    },
+    {
+      "id": "F-036",
+      "group": "patient_identity",
+      "title": "동명이인 → 생년월일 clarify",
+      "description": "동일 이름으로 복수 환자 존재 시, 생년월일로 좁힌다. 여전히 불확실하면 escalate.",
+      "policy_ref": "policy_digest §7.3",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-037",
+      "group": "patient_identity",
+      "title": "ticket_id를 correlation key로만 사용",
+      "description": "ticket_id는 요청-응답 흐름 추적용. 환자 identity 자체가 아님. tickets.json 스키마 변경 금지.",
+      "policy_ref": "policy_digest §0.2, §7.4",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-038",
+      "group": "patient_identity",
+      "title": "환자 식별 정보 bookings.json에 저장",
+      "description": "patient_name, patient_contact, birth_date는 tickets.json이 아닌 bookings.json 레코드에 저장.",
+      "policy_ref": "policy_digest §7.4",
+      "priority": 1,
+      "status": "required",
+      "impl_note": "create_booking() 호출 시 patient_contact 포함 필수"
+    },
+    {
+      "id": "F-039",
+      "group": "patient_identity",
+      "title": "환자 식별 정보를 세션 중간 상태로 관리",
+      "description": "수집된 is_proxy_booking, patient_name, patient_contact는 tickets.json에 쓰지 않고 session/dialogue state에서 관리. 최종 예약 시 bookings.json에 반영.",
+      "policy_ref": "policy_digest §0.2, §5.6",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-041",
+      "group": "dialogue",
+      "title": "pending_missing_info_queue 상태 추적",
+      "description": "누락 정보를 큐로 관리. 한 번에 한 가지가 아니라 가능하면 여러 필드를 동시에 채운다.",
+      "policy_ref": "policy_digest §5.3",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_dialogue.py"
+    },
+    {
+      "id": "F-042",
+      "group": "dialogue",
+      "title": "clarify_turn_count 상한 관리",
+      "description": "clarify 최대 4단계 누적. 4단계 후 핵심 정보 미확보 시 escalate 검토.",
+      "policy_ref": "policy_digest §5.4",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_dialogue.py"
+    },
+    {
+      "id": "F-043",
+      "group": "dialogue",
+      "title": "누적 슬롯 유지 (date/time/dept/patient_contact/is_proxy)",
+      "description": "멀티턴 중 이미 확보된 슬롯은 유지. 매 턴마다 처음부터 다시 묻지 않음. is_proxy_booking 플래그도 세션 내 유지.",
+      "policy_ref": "policy_digest §5.3",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_dialogue.py"
+    },
+    {
+      "id": "F-044",
+      "group": "dialogue",
+      "title": "매 턴 재평가",
+      "description": "사용자 입력 후 모든 누적 상태를 기반으로 action을 재평가한다.",
+      "policy_ref": "policy_digest §5.3",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-045",
+      "group": "dialogue",
+      "title": "대체 슬롯 선택 상태 전환",
+      "description": "요청 슬롯 불가 시 대체 슬롯 후보를 제시하고 선택 대기 상태로 전환.",
+      "policy_ref": "policy_digest §5.3, §8.6",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-046",
+      "group": "dialogue",
+      "title": "최종 확인 후 영속화",
+      "description": "예약/변경/취소는 사용자 확인(confirmation) 응답 이후에만 bookings.json에 반영.",
+      "policy_ref": "policy_digest §5.3, §11.2",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-047",
+      "group": "dialogue",
+      "title": "clarify-first 원칙",
+      "description": "복구 가능한 불확실성(정보 부족, 슬롯 불가)은 escalate보다 먼저 clarify로 처리.",
+      "policy_ref": "policy_digest §5.1, §5.2",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-048",
+      "group": "dialogue",
+      "title": "대화 모드별 공통 agent core",
+      "description": "chat.py와 run.py는 동일한 src/agent.py 로직을 공유. 별도 구현 금지.",
+      "policy_ref": "AGENTS.md rule 1",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-051",
+      "group": "policy",
+      "title": "결정론적 정책 검사 (LLM 위임 금지)",
+      "description": "24시간 규칙, 정원, 운영시간, 슬롯 계산은 src/policy.py에서 결정론으로 처리. LLM에 판단 위임 금지.",
+      "policy_ref": "AGENTS.md rule 4, policy_digest §0.1",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_policy.py"
+    },
+    {
+      "id": "F-052",
+      "group": "policy",
+      "title": "운영시간 적용 (평일/토/일/공휴일)",
+      "description": "평일 09:00-18:00, 토 09:00-13:00, 일 휴진. 점심 12:30-13:30 예약 불가. 공휴일 불확실 시 clarify.",
+      "policy_ref": "policy_digest §3",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_policy.py"
+    },
+    {
+      "id": "F-053",
+      "group": "policy",
+      "title": "1시간 정원 3명 제한",
+      "description": "1시간 타임 윈도우 최대 3명. 4번째 예약 시도는 불가, 대체안 제시.",
+      "policy_ref": "policy_digest §8.2",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_policy.py"
+    },
+    {
+      "id": "F-054",
+      "group": "policy",
+      "title": "초진 40분 / 재진 30분 슬롯",
+      "description": "초진은 40분 슬롯으로 겹침 계산. 30분 빈칸만 있으면 초진 예약 불가, 다른 시간 안내.",
+      "policy_ref": "policy_digest §8.3",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_policy.py"
+    },
+    {
+      "id": "F-055",
+      "group": "policy",
+      "title": "24시간 변경/취소 경계값",
+      "description": "정확히 24시간 전 = 허용. 24시간 미만 = 불가. 일반 신규 당일 예약은 24시간 규칙 적용 안 함.",
+      "policy_ref": "policy_digest §9.1, §8.4, §13",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_policy.py"
+    },
+    {
+      "id": "F-056",
+      "group": "policy",
+      "title": "슬롯 불가 시 대체안 제시",
+      "description": "예약 불가 시 같은 날 다른 시간 또는 다음 가용일 후보 1-3개 제시. 단순 거절 금지.",
+      "policy_ref": "policy_digest §8.6",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-057",
+      "group": "policy",
+      "title": "당일 일반 신규 예약 허용",
+      "description": "급성/응급이 아닌 당일 신규 예약은 정상 정책(운영시간/정원)으로 처리 가능.",
+      "policy_ref": "policy_digest §8.4",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-061",
+      "group": "storage",
+      "title": "bookings.json이 진실원천",
+      "description": "예약 생성/변경/취소/조회/초진재진 판정의 모든 최종 기준은 data/bookings.json. ticket.context보다 우선.",
+      "policy_ref": "AGENTS.md rule 5, policy_digest §7.1",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_storage.py"
+    },
+    {
+      "id": "F-062",
+      "group": "storage",
+      "title": "find_bookings() patient_contact 필터 지원",
+      "description": "storage.find_bookings()가 patient_contact 파라미터로 검색을 지원해야 함. 전화번호 우선 식별을 구현하는 핵심 변경.",
+      "policy_ref": "policy_digest §6.4, §7.3, §7.4",
+      "priority": 1,
+      "status": "required",
+      "impl_note": "src/storage.py find_bookings()에 patient_contact 필터 추가"
+    },
+    {
+      "id": "F-063",
+      "group": "storage",
+      "title": "resolve_customer_type_from_history() 전화번호 우선 확장",
+      "description": "현재 name+birth_date 기반 함수를 patient_contact 우선으로 확장. 전화번호로 먼저 이력 조회 후 초진/재진 판정.",
+      "policy_ref": "policy_digest §6.4, §7.3",
+      "priority": 1,
+      "status": "required",
+      "impl_note": "src/storage.py resolve_customer_type_from_history()에 patient_contact 파라미터 추가"
+    },
+    {
+      "id": "F-064",
+      "group": "storage",
+      "title": "확인 직전 fresh storage recheck",
+      "description": "최종 확인 단계 직전에 저장소를 다시 조회해 정원/중복 여부 재검증. 스냅샷 의존 금지.",
+      "policy_ref": "policy_digest §5.3, AGENTS.md rule 6",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-065",
+      "group": "storage",
+      "title": "저장 실패 시 거짓 성공 금지",
+      "description": "bookings.json 저장 실패(권한, 디스크 등) 시 성공 응답 반환 금지. clarify 또는 escalate로 복구.",
+      "policy_ref": "AGENTS.md rule 10 (analogous), policy_digest §0.1",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_storage.py"
+    },
+    {
+      "id": "F-066",
+      "group": "storage",
+      "title": "bookings.json 레코드에 patient_contact 포함",
+      "description": "create_booking() 호출 시 patient_name, patient_contact (필수), is_proxy_booking, birth_date (선택)를 레코드에 포함.",
+      "policy_ref": "policy_digest §7.4",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-067",
+      "group": "storage",
+      "title": "ticket.context 힌트 전용 사용",
+      "description": "context.has_existing_appointment, context.preferred_department는 후속 질문 줄이기용 힌트. 저장소 재검증 필수.",
+      "policy_ref": "policy_digest §7.2",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-071",
+      "group": "calcom",
+      "title": "calcom_client.py 단일 진입점",
+      "description": "cal.com API 호출은 src/calcom_client.py를 통해서만 수행. agent.py 직접 호출 금지.",
+      "policy_ref": "AGENTS.md rule 10, policy_digest §11",
+      "priority": 3,
+      "status": "required"
+    },
+    {
+      "id": "F-072",
+      "group": "calcom",
+      "title": "available slots 조회 후 응답 반영",
+      "description": "예약 가능 시간은 cal.com available slots API 확인 후에만 고객에게 안내.",
+      "policy_ref": "policy_digest §11.2",
+      "priority": 3,
+      "status": "required"
+    },
+    {
+      "id": "F-073",
+      "group": "calcom",
+      "title": "booking 생성 조건 준수",
+      "description": "chat: 사용자 확인 후에만 생성. run: 정의된 자동화 정책 하에서만. safety gate + local policy 통과 필수.",
+      "policy_ref": "policy_digest §11.1, §11.2",
+      "priority": 3,
+      "status": "required",
+      "test_ref": "tests/test_calcom.py"
+    },
+    {
+      "id": "F-074",
+      "group": "calcom",
+      "title": "cal.com 실패 시 거짓 성공 금지",
+      "description": "cal.com API 오류/타임아웃 시 예약 성공 응답 금지. clarify 또는 escalate 또는 연동 불가 안내.",
+      "policy_ref": "policy_digest §11.2",
+      "priority": 2,
+      "status": "required",
+      "test_ref": "tests/test_calcom.py"
+    },
+    {
+      "id": "F-081",
+      "group": "output",
+      "title": "배치 출력 스키마 준수",
+      "description": "ticket_id / classified_intent / department / action / response / confidence / reasoning 키 포함. 추가 키는 허용하나 필수 키 누락 금지.",
+      "policy_ref": "policy_digest §12",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_batch.py"
+    },
+    {
+      "id": "F-082",
+      "group": "output",
+      "title": "reasoning에 실제 파이프라인 근거 반영",
+      "description": "reasoning은 safety/classification/extraction/policy/storage 결과를 반영한 실제 근거. 고정 문구 대체 금지.",
+      "policy_ref": "policy_digest §12.1",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-083",
+      "group": "output",
+      "title": "Ollama format='json' 구조화 출력",
+      "description": "LLM 구조화 출력은 Ollama qwen3-coder:30b의 format='json' 사용.",
+      "policy_ref": "AGENTS.md rule 8, policy_digest §0.1",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-084",
+      "group": "output",
+      "title": "LLM 오류 처리 (거짓 성공 금지)",
+      "description": "Ollama 호출 실패 또는 파싱 오류 시 거짓 성공 반환 금지. fallback 처리 필수.",
+      "policy_ref": "AGENTS.md rule 10 (analogous)",
+      "priority": 1,
+      "status": "required"
+    },
+    {
+      "id": "F-091",
+      "group": "metrics",
+      "title": "agent_success 이벤트 계측",
+      "description": "사람 개입 없이 book/modify/cancel/check/safe_reject로 종결된 케이스를 agent_success로 집계.",
+      "policy_ref": "policy_digest §1.3",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-092",
+      "group": "metrics",
+      "title": "safe_reject / clarify / escalate / hard_fail 이벤트 계측",
+      "description": "safe_reject, agent_soft_fail_clarify, agent_soft_fail_escalate, agent_hard_fail, clarify_resolved, clarify_abandoned 이벤트 런타임 집계.",
+      "policy_ref": "policy_digest §1.3",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-093",
+      "group": "metrics",
+      "title": "Unsafe Medical Answer Rate = 0% 유지",
+      "description": "의료 판단/약물/치료 조언 응답이 1건이라도 발생하면 즉시 중단 기준.",
+      "policy_ref": "policy_digest §1.2",
+      "priority": 1,
+      "status": "required",
+      "test_ref": "tests/test_safety.py"
+    },
+    {
+      "id": "F-094",
+      "group": "metrics",
+      "title": "Safe Resolution Rate >= 70% 목표",
+      "description": "전체 티켓 중 hard fail 없이 AI가 안전하게 종결한 비율 >= 70%.",
+      "policy_ref": "policy_digest §1.1",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-101",
+      "group": "docs",
+      "title": "docs/q1_metric_rubric.md 완성",
+      "description": "Q1 KPI 2-3개 + Regression 지표 1-2개, 선정 근거, 측정 방법 포함 1페이지.",
+      "policy_ref": "request.md Q1",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-102",
+      "group": "docs",
+      "title": "docs/q3_safety.md 완성",
+      "description": "Q3 안전성 대응: 실패율 0% 의미, 가드레일, 잔존 리스크, 고객 커뮤니케이션 1-2페이지.",
+      "policy_ref": "request.md Q3",
+      "priority": 2,
+      "status": "required"
+    },
+    {
+      "id": "F-103",
+      "group": "docs",
+      "title": "docs/final_report.md 최신화",
+      "description": "아키텍처 설명 + 주요 설계 결정 근거 + 데모 증빙(스크린샷/영상) 포함.",
+      "policy_ref": "request.md Deliverables",
+      "priority": 3,
+      "status": "required"
+    }
+  ]
 }
