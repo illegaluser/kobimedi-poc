@@ -27,7 +27,7 @@ from .models import User, Ticket as PolicyTicket
 
 
 AFFIRMATIVE_PATTERNS = [r"^네$", r"^예$", r"^넵$", r"^맞아요$", r"좋아요", r"진행", r"예약해", r"확정"]
-NEGATIVE_PATTERNS = [r"^아니오$", r"^아니요$", r"^아뇨$", r"다시", r"취소할게", r"안 할래"]
+NEGATIVE_PATTERNS = [r"^아니오$", r"^아니요$", r"^아뇨$", r"다시", r"취소할게", r"안 할래", r"싫어", r"싫습니다", r"^안 ?해$", r"^안 ?할래$", r"^됐어$", r"^괜찮아요$"]
 VALID_ACTIONS = {
     "book_appointment",
     "modify_appointment",
@@ -556,6 +556,67 @@ def _classify_intent_with_optional_now(user_message: str, now: datetime) -> dict
         return classify_intent(user_message, now=now)
     except TypeError:
         return classify_intent(user_message)
+
+
+_TICKET_CUSTOMER_TYPE_MAP = {
+    "초진": "초진", "first_visit": "초진", "first": "초진", "new": "초진",
+    "재진": "재진", "returning": "재진", "follow_up": "재진", "follow-up": "재진", "revisit": "재진",
+}
+_SUPPORTED_DEPARTMENTS = {"이비인후과", "내과", "정형외과"}
+
+
+def _merge_ticket_context_into_intent(ticket: dict, intent_result: dict) -> dict:
+    """배치 모드 전용: ticket 구조화 메타데이터로 intent 누락 필드를 채운다.
+
+    LLM이 message 텍스트에서 추출하지 못한 customer_type / preferred_* 필드를
+    ticket 에 이미 정리된 값으로 보완하여 불필요한 clarify 응답을 방지한다.
+    """
+    context = ticket.get("context") or {}
+    result = dict(intent_result)
+
+    # customer_type 보완
+    if not result.get("customer_type") and ticket.get("customer_type"):
+        normalized = _TICKET_CUSTOMER_TYPE_MAP.get(str(ticket["customer_type"]).strip())
+        if normalized:
+            result["customer_type"] = normalized
+
+    # 분과 보완
+    if not result.get("department"):
+        preferred_dept = context.get("preferred_department")
+        if preferred_dept in _SUPPORTED_DEPARTMENTS:
+            result["department"] = preferred_dept
+
+    # 날짜/시간 보완
+    if not result.get("date") and context.get("preferred_date"):
+        result["date"] = str(context["preferred_date"])
+    if not result.get("time") and context.get("preferred_time"):
+        result["time"] = str(context["preferred_time"])
+
+    # 보완된 필드를 missing_info 에서 제거
+    filled = set()
+    for field in list(result.get("missing_info") or []):
+        if field == "customer_type" and result.get("customer_type"):
+            filled.add(field)
+        elif field == "department" and result.get("department"):
+            filled.add(field)
+        elif field == "date" and result.get("date"):
+            filled.add(field)
+        elif field == "time" and result.get("time"):
+            filled.add(field)
+    result["missing_info"] = [f for f in (result.get("missing_info") or []) if f not in filled]
+
+    # 모든 필수 슬롯이 채워졌으면 action 을 clarify → book_appointment 로 업그레이드
+    if result.get("action") == "clarify" and not result["missing_info"]:
+        classified = result.get("classified_intent") or ""
+        all_slots_ready = (
+            result.get("department") and result.get("date")
+            and result.get("time") and result.get("customer_type")
+        )
+        if classified == "book_appointment" or all_slots_ready:
+            result["action"] = "book_appointment"
+            result["classified_intent"] = "book_appointment"
+
+    return result
 
 
 def _run_safety_gate(user_message: str, session_state: dict | None = None) -> dict:

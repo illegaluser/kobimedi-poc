@@ -104,6 +104,19 @@ EMERGENCY_PATTERNS = [
     r"호흡(이)? 안",
     r"출혈",
     r"쓰러",
+    # 참을 수 없는 통증 (정책 3.3)
+    r"참을 수(가)?\s*없",
+    r"너무 아파서 못 참",
+    # 고열 38도 이상
+    r"열이?\s*(3[89]|[4-9]\d)\s*도",
+    r"고열",
+    # 이상 분비물
+    r"진물",
+    r"고름",
+    # 당일 긴급 진료 요청
+    r"오늘 당장.*봐",
+    r"오늘 중으로.*꼭",
+    r"지금 당장.*진료",
 ]
 
 INJECTION_PATTERNS = [
@@ -254,12 +267,20 @@ def _ensure_reference_now(now: datetime | None) -> datetime:
     return now
 
 
+_UNSUPPORTED_DEPARTMENTS = [
+    "피부과", "안과", "비뇨기과", "소아과", "치과", "산부인과",
+    "신경과", "신경외과", "흉부외과", "성형외과", "재활의학과",
+    "가정의학과", "비뇨의학과", "응급의학과",
+]
+
+
 def _extract_requested_department(text: str) -> str | None:
     for department, keywords in DEPARTMENT_KEYWORDS.items():
         if any(keyword in text for keyword in keywords):
             return department
-    if "피부과" in text:
-        return "피부과"
+    for dept in _UNSUPPORTED_DEPARTMENTS:
+        if dept in text:
+            return dept
     return None
 
 
@@ -437,6 +458,8 @@ _NON_NAME_WORDS: frozenset[str] = frozenset({
     "부탁", "부탁해", "부탁드려", "감사", "안녕", "죄송", "실례",
     # Common conversational words
     "맞아요", "알겠습니다", "그리고", "그런데", "그러면", "아니요",
+    # Generic pronouns / vague words that are never patient names
+    "아무", "누구", "무언가", "어떤", "그냥", "그게", "이게", "저게", "도와",
 })
 
 
@@ -454,10 +477,10 @@ def _extract_patient_name_from_text(text: str) -> str | None:
                 return normalized
 
     for token in clean_text.split():
-        token = re.sub(r"(?:입니다|이에요|예요|이요|요|,)$", "", token).strip()
+        token = re.sub(r"(?:주세요|세요|입니다|이에요|예요|이요|요|,)$", "", token).strip()
         if (
-            2 <= len(token) <= 4
-            and re.fullmatch(r"[가-힣]{2,4}", token)
+            2 <= len(token) <= 3
+            and re.fullmatch(r"[가-힣]{2,3}", token)
             and token not in _NON_NAME_WORDS
         ):
             return token
@@ -644,6 +667,8 @@ def _extract_date_from_text(text: str, now: datetime) -> str | None:
             return None
     if "오늘" in text:
         return now.date().isoformat()
+    if "내일모레" in text:
+        return (now.date() + timedelta(days=2)).isoformat()
     if "내일" in text:
         return (now.date() + timedelta(days=1)).isoformat()
     if "모레" in text:
@@ -678,6 +703,8 @@ def _extract_time_from_text(text: str) -> str | None:
     hhmm_match = re.search(r"(오전|오후)?\s*(\d{1,2}):(\d{2})", text)
     if hhmm_match:
         meridiem = hhmm_match.group(1)
+        if not meridiem and re.search(r"저녁|밤", text):
+            meridiem = "오후"
         hour = int(hhmm_match.group(2))
         minute = int(hhmm_match.group(3))
         if meridiem == "오후" and hour < 12:
@@ -689,6 +716,8 @@ def _extract_time_from_text(text: str) -> str | None:
     if not hour_match:
         return None
     meridiem = hour_match.group(1)
+    if not meridiem and re.search(r"저녁|밤", text):
+        meridiem = "오후"
     hour = int(hour_match.group(2))
     minute_token = hour_match.group(3)
     explicit_minute = hour_match.group(4)

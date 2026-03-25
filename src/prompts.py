@@ -83,6 +83,12 @@ Return a single JSON object with the following fields. Use `null` for any fields
     - Use "book_appointment", "modify_appointment", "cancel_appointment", "check_appointment" for clear booking-related intents.
     - If essential information for an action is missing, list the missing fields in `missing_info` and set `action` to "clarify".
     - If the user is only asking for a department based on symptoms, set `action` to "clarify" and fill the `department` field if you can infer it.
+    - Use "escalate" when ANY of the following apply (human agent required):
+      * Unbearable or acute pain ("참을 수 없", "너무 아파서 못", "극심한 통증")
+      * High fever 38°C or above ("열이 38도", "열이 39도") or abnormal discharge ("진물", "고름")
+      * Pediatric emergency combined with same-day urgency ("오늘 중으로 꼭", "오늘 당장 봐")
+      * Insurance/cost/doctor-contact inquiries
+      * Emotional distress, anger, or explicit request for a human agent
 3.  **Department & Doctor Mapping**:
     - Map doctors to departments: 이춘영 원장 -> 이비인후과, 김만수 원장 -> 내과, 원징수 원장 -> 정형외과.
     - Infer department from symptoms for booking guidance only (e.g., 콧물 -> 이비인후과), never as a medical diagnosis.

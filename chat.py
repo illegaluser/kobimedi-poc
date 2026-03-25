@@ -25,7 +25,8 @@ def main() -> None:
             continue
 
         result = process_message(user_message, session)
-        print(result.get("response", "오류가 발생했습니다. 다시 시도해 주세요."))
+        response = result.get("response") if result else None
+        print(response or "죄송합니다. 말씀을 이해하지 못했어요. 다시 말씀해 주시겠어요?")
 
 
 if __name__ == "__main__":

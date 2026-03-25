@@ -69,3 +69,108 @@
 ### Next Step
 - Ollama LLM E2E 통합 테스트
 - test_classifier.py LLM 의존 케이스 별도 처리
+
+---
+
+## Current Status (2026-03-25 전체 테스트 및 골든 eval)
+
+### 수행 내용
+
+#### 1. test_classifier.py 4건 수정 (20/20 통과)
+
+**근본 원인**: `_extract_patient_name_from_text`가 일반 한국어 단어를 이름으로 오추출
+- `\"아무 말\"` → `\"아무\"` 추출 (오탐) → `patient_name` truthy → `error` 키 조건 실패 → `KeyError: 'error'`
+- `\"예약 도와주세요\"` → `\"도와주세\"` 추출 (오탐) → 동일 문제
+
+**수정 위치: `src/classifier.py`**
+
+| 수정 항목 | 내용 |
+|---|---|
+| `_NON_NAME_WORDS` 확장 | `\"아무\"`, `\"누구\"`, `\"도와\"` 등 제네릭 단어 추가 |
+| 토큰 길이 제한 | `4→3` (한국 이름은 2~3글자) |
+| 접미사 제거 패턴 | `\"주세요|세요\"` 추가 → `\"도와주세\"` 오탐 차단 |
+
+#### 2. 에스컬레이션 패턴 강화 (정책 3.3 준수)
+
+**원인**: T-046, T-047이 `_is_booking_related()`에서 `\"safe\"`로 처리되어 응급 체크 무용지물
+
+**수정 위치: `src/classifier.py` — `EMERGENCY_PATTERNS` 확장**
+
+| 추가 패턴 | 대상 케이스 |
+|---|---|
+| `r\"참을 수(가)?\\s*없\"` | T-046: 참기 힘든 급성 통증 |
+| `r\"열이?\\s*(3[89]\\|[4-9]\\d)\\s*도\"` | T-047: 38도 이상 고열 |
+| `r\"진물\"`, `r\"고름\"` | T-047: 이상 분비물 |
+| `r\"오늘 당장.*봐\"`, `r\"오늘 중으로.*꼭\"` | 당일 긴급 진료 요청 |
+| `r\"고열\"` | 명시적 고열 표현 |
+
+**수정 위치: `src/prompts.py` — `CLASSIFICATION_SYSTEM_PROMPT`**
+- Action Logic에 `\"escalate\"` 사용 조건 명시 (통증 참기 힘듦, 고열, 이상 분비물, 비용 문의, 상담원 요청 등)
+
+### 테스트 결과
+
+| 테스트 | 결과 |
+|---|---|
+| 전체 단위 테스트 | **124 / 124 passed** |
+| test_classifier.py | 20 / 20 (4건 수정) |
+| 회귀 없음 | ✅ |
+
+### 골든 eval 결과 (Ollama qwen3-coder:30b)
+
+| 지표 | 수정 전 | 수정 후 |
+|---|---|---|
+| Action 정확도 | 14/50 (28.0%) | **16/50 (32.0%)** |
+| Reject 재현율 | 6/6 (100.0%) | **6/6 (100.0%)** |
+| safe_reject (escalate 포함) | 8건 | **10건 (+2)** |
+
+T-046, T-047 → `category: emergency → action: escalate` ✅ (정책 3.3 준수)
+
+### 잔여 불일치 분석 (코드 구조 문제 아님)
+
+| 불일치 유형 | 케이스 수 | 원인 |
+|---|---|---|
+| book_appointment→clarify | ~16건 | LLM(qwen3-coder:30b) 의도 분류 한계 — 응답 자체는 \"예약할까요?\" 확인 문구 포함 |
+| modify/cancel→reject | ~13건 | 정책 정상 동작 — bookings.json에 해당 고객 예약 없음. gold eval이 final action 아닌 raw intent 기대 |
+
+### Next Step
+- LLM 모델 업그레이드 또는 프롬프트 개선으로 book_appointment 분류 정확도 향상 검토
+- gold eval 지표를 `classified_intent` 기준으로도 측정하여 LLM 분류 정확도 별도 파악
+
+---
+
+## Current Status (2026-03-25 대화 플로우 버그 5건 수정)
+
+### 발견 경위
+실제 `chat.py` 대화 테스트에서 다수의 사용성 문제 확인
+
+### 수정된 결함 5건
+
+| # | 결함 | 원인 | 수정 위치 |
+|---|------|------|-----------|
+| 1 | "내일모레" → 내일(+1일)로 잘못 파싱 | `"내일" in text`가 `"내일모레"`에서 먼저 매칭 | `src/classifier.py` — `_extract_date_from_text()`: `"내일모레"` 체크를 `"내일"` 앞에 배치 |
+| 2 | "저녁 9시" → 오전 09:00으로 파싱 | `_extract_time_from_text()`에서 `"저녁"`, `"밤"` 미처리 (오전/오후만 인식) | `src/classifier.py` — `_extract_time_from_text()`: `"저녁\|밤"` → `"오후"` PM 변환 추가 (HH:MM 및 N시 양쪽 경로) |
+| 3 | "싫어" → None 반환 (부정 응답 미인식) | `NEGATIVE_PATTERNS`에 "싫어" 등 일상 거절 표현 미포함 | `src/agent.py` — `NEGATIVE_PATTERNS`: `"싫어"`, `"싫습니다"`, `"안 ?해"`, `"안 ?할래"`, `"됐어"`, `"괜찮아요"` 추가 |
+| 4 | "안과", "비뇨기과" 입력 시 거부 메시지 없이 같은 질문 반복 | `_extract_requested_department()`에 피부과만 비지원 분과 추가, 나머지 미등록 | `src/classifier.py` — `_UNSUPPORTED_DEPARTMENTS` 리스트 신설 (안과, 비뇨기과, 소아과, 치과 등 13개 분과) |
+| 5 | `response`가 `None`일 때 `None` 문자열 출력 | `chat.py`에서 `None` 응답에 대한 fallback 없음 | `chat.py` — `response or "죄송합니다. 말씀을 이해하지 못했어요..."` fallback 추가 |
+
+### 테스트 결과
+
+| 테스트 | 결과 |
+|---|---|
+| 전체 단위 테스트 | **124 / 124 passed** |
+| 회귀 없음 | ✅ |
+
+### 골든 eval 결과 (Ollama)
+
+| 지표 | 수정 전 (baseline) | 수정 후 |
+|---|---|---|
+| Action 정확도 | 14/50 (28.0%) | **16/50 (32.0%)** |
+| Reject 재현율 | 6/6 (100.0%) | **6/6 (100.0%)** |
+| safe_reject | 8건 | **10건 (+2)** |
+
+- 수정 전 T-046, T-047이 clarify로 오분류 → 수정 후 escalate로 정상 분류
+- 나머지 불일치는 기존과 동일 (LLM 분류 한계 및 저장소 미존재 예약 정책 동작)
+
+### Next Step
+- "내일모레 저녁 9시" 등 복합 시간 표현 E2E 대화 테스트 검증
+- 부정 응답 후 새 예약 플로우 재진입 E2E 검증
