@@ -118,8 +118,6 @@ def build_missing_info_question(
 
     if primary == "is_proxy_booking":
         return "예약하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 예약하시는 건가요?"
-    if {"patient_name", "patient_contact"}.issubset(set(missing_fields)):
-        return "예약 진행을 위해 환자분 성함과 연락처를 함께 알려주세요."
     if primary == "patient_name":
         return "예약 진행을 위해 환자분 성함을 알려주세요."
     if primary == "patient_contact":

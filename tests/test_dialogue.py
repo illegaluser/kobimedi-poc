@@ -190,7 +190,7 @@ def test_F033_proxy_booking_collects_actual_patient_info(
         now=REFERENCE_NOW,
     )
     assert first_result["action"] == "clarify"
-    assert "성함과 연락처" in first_result["response"]
+    assert "성함" in first_result["response"]
     assert session_state["is_proxy_booking"] is True
 
     second_result = process_ticket(

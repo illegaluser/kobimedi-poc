@@ -421,6 +421,25 @@ def _extract_customer_type_from_text(text: str) -> str | None:
     return None
 
 
+# Words that are never valid patient names (booking terms, dept names, filler words, etc.)
+_NON_NAME_WORDS: frozenset[str] = frozenset({
+    # Booking-related action words
+    "예약", "취소", "변경", "확인", "조회", "접수",
+    # Medical/visit terms
+    "진료", "상담", "치료", "처방", "수술", "검사", "방문",
+    # Department names
+    "내과", "외과", "이비인후과", "정형외과", "피부과", "안과", "소아과", "치과", "응급",
+    # Temporal expressions
+    "오전", "오후", "오늘", "내일", "모레", "글피",
+    # Identity / proxy terms
+    "본인", "대리", "가족", "지인", "보호자", "환자",
+    # Polite expressions / filler
+    "부탁", "부탁해", "부탁드려", "감사", "안녕", "죄송", "실례",
+    # Common conversational words
+    "맞아요", "알겠습니다", "그리고", "그런데", "그러면", "아니요",
+})
+
+
 def _extract_patient_name_from_text(text: str) -> str | None:
     clean_text = re.sub(PHONE_PATTERN, "", text)
     patterns = [
@@ -431,14 +450,18 @@ def _extract_patient_name_from_text(text: str) -> str | None:
         match = re.search(pattern, text)
         if match:
             normalized = _normalize_patient_name_value(match.group(1))
-            if normalized:
+            if normalized and normalized not in _NON_NAME_WORDS:
                 return normalized
-                
+
     for token in clean_text.split():
         token = re.sub(r"(?:입니다|이에요|예요|이요|요|,)$", "", token).strip()
-        if 2 <= len(token) <= 4 and re.fullmatch(r"[가-힣]{2,4}", token):
+        if (
+            2 <= len(token) <= 4
+            and re.fullmatch(r"[가-힣]{2,4}", token)
+            and token not in _NON_NAME_WORDS
+        ):
             return token
-            
+
     return None
 
 

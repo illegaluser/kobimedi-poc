@@ -46,6 +46,28 @@ BOOKING_RELATED_ACTIONS = {
 PROXY_TRUE_PATTERNS = [r"대리", r"대신", r"가족", r"엄마", r"어머니", r"아버지", r"아빠", r"보호자", r"지인"]
 PROXY_FALSE_PATTERNS = [r"본인", r"저요", r"저입니다", r"제가", r"환자 본인", r"제가 받을", r"제가 진료"]
 
+# Words that are never valid patient names (booking terms, dept names, filler words, etc.)
+_NON_NAME_WORDS: frozenset[str] = frozenset({
+    # Booking-related action words
+    "예약", "취소", "변경", "확인", "조회", "접수",
+    # Medical/visit terms
+    "진료", "상담", "치료", "처방", "수술", "검사", "방문",
+    # Department names
+    "내과", "외과", "이비인후과", "정형외과", "피부과", "안과", "소아과", "치과", "응급",
+    # Temporal expressions
+    "오전", "오후", "오늘", "내일", "모레", "글피",
+    # Identity / proxy terms
+    "본인", "대리", "가족", "지인", "보호자", "환자",
+    # Polite expressions / filler
+    "부탁", "부탁해", "부탁드려", "감사", "안녕", "죄송", "실례",
+    # Common conversational words
+    "맞아요", "알겠습니다", "그리고", "그런데", "그러면", "아니요",
+    # Korean pronouns / determiners that are not names
+    "아무", "누구", "무엇", "어떤", "이런", "저런", "그런",
+    # Short interrogative / exclamatory words
+    "왜요", "네요", "혹시", "잠깐", "저기",
+})
+
 # Backward-compatible alias used by some tests/mocks.
 classify_safety = safety_check
 
@@ -402,8 +424,8 @@ def _reset_clarify_turn_count(session_state: dict | None) -> None:
 def _prioritize_missing_info(missing_info: list[str]) -> list[str]:
     priority = {
         "is_proxy_booking": 0,
-        "patient_contact": 1,
-        "patient_name": 2,
+        "patient_name": 1,
+        "patient_contact": 2,
         "department": 3,
         "date": 4,
         "time": 5,
@@ -865,16 +887,21 @@ def _extract_patient_name(text: str | None) -> str | None:
     match = re.search(r"(?:제 이름은|이름은|저는|환자 이름은)\s*([가-힣A-Za-z]{2,20})", normalized)
     if match:
         cleaned = re.sub(r"(?:입니다|이에요|예요|이요|요)$", "", match.group(1)).strip(" .,!")
-        return cleaned
-        
+        if cleaned and cleaned not in _NON_NAME_WORDS:
+            return cleaned
+
     text_without_phone = re.sub(r"01[0-9][- ]?\d{3,4}[- ]?\d{4}", "", normalized)
     clean_text = re.sub(r"[^가-힣A-Za-z\s]", " ", text_without_phone)
-    
+
     for token in clean_text.split():
         token = re.sub(r"(?:입니다|이에요|예요|이요|요)$", "", token).strip()
-        if 2 <= len(token) <= 4 and re.fullmatch(r"[가-힣]{2,4}", token):
+        if (
+            2 <= len(token) <= 4
+            and re.fullmatch(r"[가-힣]{2,4}", token)
+            and token not in _NON_NAME_WORDS
+        ):
             return token
-            
+
     return None
 
 
