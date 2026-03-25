@@ -645,7 +645,8 @@
       "description": "LLM 구조화 출력은 Ollama qwen3-coder:30b의 format='json' 사용.",
       "policy_ref": "AGENTS.md rule 8, policy_digest §0.1",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-084",
@@ -654,7 +655,8 @@
       "description": "Ollama 호출 실패 또는 파싱 오류 시 거짓 성공 반환 금지. fallback 처리 필수.",
       "policy_ref": "AGENTS.md rule 10 (analogous)",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-091",

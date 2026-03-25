@@ -100,10 +100,10 @@
 
 ## Current Status
 
-- Safety gate / classifier hardening 완료
-  - `src/classifier.py`의 `safety_check()`가 classification 전에 선행되며, 의료 상담/목적 외 사용/인젝션/타 환자 정보 요청 reject 및 응급/민원/운영 문의 escalate 규칙을 반영
-  - 의료+예약 혼합 요청 분리, 증상 기반 분과 추천(진단 금지), 후속 신원 응답 예외 처리까지 테스트로 검증 완료
-  - safety 관련 feature(`F-001 ~ F-010`)와 classifier/extraction 관련 feature(`F-011 ~ F-030`) 상태를 harness에 반영 완료
+- Safety gate / classifier / LLM 예외 방어 구현 완료
+  - `src/classifier.py`에서 7개 action enum 강제, 불확실 시 `clarify` 폴백, 날짜/시간/분과/의사/환자정보/대리예약/응급 신호/기존 예약 힌트 추출까지 반영
+  - `src/llm_client.py`에서 Ollama `qwen3-coder:30b` 호출 시 `format='json'`을 강제하고, connection refused / timeout / JSON 파싱 오류 / 잘못된 응답 구조에 대해 거짓 성공 없이 `clarify` 중심 안전 폴백 적용
+  - `tests/test_classifier.py`, `tests/test_safety.py` 회귀 검증을 통과했고 harness에는 `F-011 ~ F-014`, `F-021 ~ F-030`, `F-083 ~ F-084` 상태를 반영 완료
 
 - Next step
   - `src/agent.py` 대화 상태에 `is_proxy_booking`, `patient_name`, `patient_contact`를 본격 반영하여 본인/대리인 확인 및 세션 중간 상태 수집 흐름을 구현
