@@ -19,6 +19,7 @@ from .storage import (
     find_bookings,
     load_bookings,
     normalize_birth_date,
+    normalize_patient_contact,
     resolve_customer_type_from_history,
 )
 
@@ -34,6 +35,14 @@ VALID_ACTIONS = {
     "escalate",
     "reject",
 }
+BOOKING_RELATED_ACTIONS = {
+    "book_appointment",
+    "modify_appointment",
+    "cancel_appointment",
+    "check_appointment",
+}
+PROXY_TRUE_PATTERNS = [r"대리", r"대신", r"가족", r"엄마", r"어머니", r"아버지", r"아빠", r"보호자", r"지인"]
+PROXY_FALSE_PATTERNS = [r"본인", r"저요", r"저입니다", r"제가", r"환자 본인", r"제가 받을", r"제가 진료"]
 
 # Backward-compatible alias used by some tests/mocks.
 classify_safety = safety_check
@@ -310,23 +319,35 @@ def _init_session_state(session_state: dict | None) -> dict:
             "conversation_history": [],
             "accumulated_slots": {"date": None, "time": None, "department": None},
             "customer_name": None,
+            "patient_name": None,
+            "patient_contact": None,
             "birth_date": None,
+            "is_proxy_booking": None,
             "resolved_customer_type": None,
             "pending_confirmation": None,
             "pending_action": None,
             "pending_missing_info": [],
+            "pending_missing_info_queue": [],
             "pending_candidates": None,
+            "pending_alternative_slots": None,
+            "clarify_turn_count": 0,
         }
 
     session_state.setdefault("conversation_history", [])
     session_state.setdefault("accumulated_slots", {"date": None, "time": None, "department": None})
     session_state.setdefault("customer_name", None)
+    session_state.setdefault("patient_name", None)
+    session_state.setdefault("patient_contact", None)
     session_state.setdefault("birth_date", None)
+    session_state.setdefault("is_proxy_booking", None)
     session_state.setdefault("resolved_customer_type", None)
     session_state.setdefault("pending_confirmation", None)
     session_state.setdefault("pending_action", None)
     session_state.setdefault("pending_missing_info", [])
+    session_state.setdefault("pending_missing_info_queue", list(session_state.get("pending_missing_info") or []))
     session_state.setdefault("pending_candidates", None)
+    session_state.setdefault("pending_alternative_slots", None)
+    session_state.setdefault("clarify_turn_count", 0)
     return session_state
 
 
@@ -336,14 +357,105 @@ def _record_history(session_state: dict | None, role: str, content: str) -> None
     session_state["conversation_history"].append({"role": role, "content": content})
 
 
+def _set_pending_missing_info(session_state: dict | None, missing_info: list[str]) -> None:
+    if session_state is None:
+        return
+    deduped: list[str] = []
+    for item in missing_info:
+        if item and item not in deduped:
+            deduped.append(item)
+    session_state["pending_missing_info"] = deduped
+    session_state["pending_missing_info_queue"] = deduped.copy()
+
+
+def _get_pending_missing_info(session_state: dict | None) -> list[str]:
+    if session_state is None:
+        return []
+    queue = session_state.get("pending_missing_info_queue")
+    if isinstance(queue, list) and queue:
+        return list(queue)
+    pending = session_state.get("pending_missing_info") or []
+    return list(pending)
+
+
+def _increment_clarify_turn_count(session_state: dict | None) -> None:
+    if session_state is None:
+        return
+    session_state["clarify_turn_count"] = int(session_state.get("clarify_turn_count") or 0) + 1
+
+
+def _reset_clarify_turn_count(session_state: dict | None) -> None:
+    if session_state is None:
+        return
+    session_state["clarify_turn_count"] = 0
+
+
+def _prioritize_missing_info(missing_info: list[str]) -> list[str]:
+    priority = {
+        "is_proxy_booking": 0,
+        "patient_contact": 1,
+        "patient_name": 2,
+        "department": 3,
+        "date": 4,
+        "time": 5,
+        "birth_date": 6,
+        "appointment_target": 7,
+        "slot_selection": 8,
+        "confirmation": 9,
+        "customer_name": 10,
+    }
+    deduped: list[str] = []
+    for item in missing_info:
+        if item and item not in deduped:
+            deduped.append(item)
+    return sorted(deduped, key=lambda item: (priority.get(item, 99), deduped.index(item)))
+
+
+def _should_escalate_for_clarify_limit(session_state: dict | None, missing_info: list[str]) -> bool:
+    if session_state is None:
+        return False
+    if int(session_state.get("clarify_turn_count") or 0) < 4:
+        return False
+    core_info = {
+        "is_proxy_booking",
+        "patient_name",
+        "patient_contact",
+        "department",
+        "date",
+        "time",
+        "birth_date",
+        "appointment_target",
+    }
+    return any(item in core_info for item in missing_info)
+
+
 def _clear_dialogue_state(session_state: dict | None) -> None:
     if session_state is None:
         return
     session_state["accumulated_slots"] = {"date": None, "time": None, "department": None}
     session_state["pending_confirmation"] = None
     session_state["pending_action"] = None
-    session_state["pending_missing_info"] = []
+    _set_pending_missing_info(session_state, [])
     session_state["pending_candidates"] = None
+    session_state["pending_alternative_slots"] = None
+    session_state["is_proxy_booking"] = None
+    session_state["patient_name"] = None
+    session_state["patient_contact"] = None
+    session_state["birth_date"] = None
+    _reset_clarify_turn_count(session_state)
+
+
+def _reset_pending_flow_for_new_action(session_state: dict | None, new_action: str | None = None) -> None:
+    if session_state is None:
+        return
+    session_state["accumulated_slots"] = {"date": None, "time": None, "department": None}
+    session_state["pending_confirmation"] = None
+    session_state["pending_candidates"] = None
+    session_state["pending_alternative_slots"] = None
+    _set_pending_missing_info(session_state, [])
+    if new_action:
+        session_state["pending_action"] = new_action
+    _reset_clarify_turn_count(session_state)
 
 
 def _build_response_and_record(session_state: dict | None, **kwargs) -> dict:
@@ -422,7 +534,16 @@ def _run_safety_gate(user_message: str, session_state: dict | None = None) -> di
         if session_state.get("pending_candidates") and re.fullmatch(r"\d+번(이요|이에요|으로|로)?", _normalize_text(user_message)):
             return {"category": "safe"}
 
-        pending_missing_info = session_state.get("pending_missing_info") or []
+        if session_state.get("pending_alternative_slots") and re.fullmatch(r"\d+번?(이요|이에요|으로|로)?", _normalize_text(user_message)):
+            return {"category": "safe"}
+
+        pending_missing_info = _get_pending_missing_info(session_state)
+        if "is_proxy_booking" in pending_missing_info and _parse_proxy_answer(user_message) is not None:
+            return {"category": "safe"}
+        if "patient_name" in pending_missing_info and _extract_patient_name(user_message):
+            return {"category": "safe"}
+        if "patient_contact" in pending_missing_info and _extract_patient_contact(user_message):
+            return {"category": "safe"}
         if "customer_name" in pending_missing_info and _extract_patient_name(user_message):
             return {"category": "safe"}
         if "birth_date" in pending_missing_info and _extract_birth_date(user_message):
@@ -623,6 +744,97 @@ def _get_effective_birth_date(ticket: dict | None, session_state: dict | None) -
     return normalize_birth_date(raw_birth_date)
 
 
+def _format_patient_contact(value: str | None) -> str | None:
+    normalized = normalize_patient_contact(value)
+    if not normalized:
+        return None
+    if len(normalized) == 11:
+        return f"{normalized[:3]}-{normalized[3:7]}-{normalized[7:]}"
+    if len(normalized) == 10:
+        return f"{normalized[:3]}-{normalized[3:6]}-{normalized[6:]}"
+    return normalized
+
+
+def _extract_patient_contact(text: str | None) -> str | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    match = re.search(r"01[0-9][- ]?\d{3,4}[- ]?\d{4}", normalized)
+    if not match:
+        digits_only = re.sub(r"\D", "", normalized)
+        if digits_only.startswith("01") and len(digits_only) in {10, 11}:
+            return _format_patient_contact(digits_only)
+        return None
+    return _format_patient_contact(match.group(0))
+
+
+def _parse_proxy_answer(text: str | None) -> bool | None:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    if any(re.search(pattern, normalized) for pattern in PROXY_TRUE_PATTERNS):
+        return True
+    if any(re.search(pattern, normalized) for pattern in PROXY_FALSE_PATTERNS):
+        return False
+    return None
+
+
+def _get_effective_patient_name(ticket: dict | None, session_state: dict | None) -> str | None:
+    return (
+        (ticket or {}).get("patient_name")
+        or (session_state or {}).get("patient_name")
+        or ((ticket or {}).get("customer_name") if session_state is None else None)
+    )
+
+
+def _get_effective_patient_contact(ticket: dict | None, session_state: dict | None) -> str | None:
+    return _format_patient_contact((ticket or {}).get("patient_contact") or (session_state or {}).get("patient_contact"))
+
+
+def _get_effective_proxy_booking(ticket: dict | None, session_state: dict | None) -> bool | None:
+    if (ticket or {}).get("is_proxy_booking") is not None:
+        return bool(ticket.get("is_proxy_booking"))
+    if (session_state or {}).get("is_proxy_booking") is not None:
+        return bool(session_state.get("is_proxy_booking"))
+    return None
+
+
+def _sync_identity_state_from_intent(ticket: dict, session_state: dict | None, intent_result: dict, *, is_chat: bool) -> None:
+    if session_state is None and not ticket:
+        return
+
+    patient_name = intent_result.get("patient_name")
+    patient_contact = _format_patient_contact(intent_result.get("patient_contact"))
+    birth_date = normalize_birth_date(intent_result.get("birth_date"))
+    proxy_flag = intent_result.get("is_proxy_booking")
+
+    if proxy_flag is not None:
+        ticket["is_proxy_booking"] = bool(proxy_flag)
+        if session_state is not None:
+            session_state["is_proxy_booking"] = bool(proxy_flag)
+
+    if patient_name:
+        ticket["patient_name"] = patient_name
+        if session_state is not None:
+            session_state["patient_name"] = patient_name
+
+    if patient_contact:
+        ticket["patient_contact"] = patient_contact
+        if session_state is not None:
+            session_state["patient_contact"] = patient_contact
+
+    if birth_date:
+        ticket["birth_date"] = birth_date
+        if session_state is not None:
+            session_state["birth_date"] = birth_date
+
+    if session_state is None and not ticket.get("patient_name") and ticket.get("customer_name") and not ticket.get("is_proxy_booking"):
+        ticket["patient_name"] = ticket.get("customer_name")
+
+    if session_state is not None and is_chat and session_state.get("is_proxy_booking") is False and not session_state.get("patient_name") and ticket.get("customer_name"):
+        session_state["patient_name"] = ticket.get("customer_name")
+
+
 def _extract_patient_name(text: str | None) -> str | None:
     normalized = _normalize_text(text)
     if not normalized:
@@ -657,8 +869,12 @@ def _extract_birth_date(text: str | None) -> str | None:
     return None
 
 
-def _resolve_history_customer_type(customer_name: str | None, birth_date: str | None) -> dict:
-    if not customer_name:
+def _resolve_history_customer_type(
+    customer_name: str | None,
+    birth_date: str | None,
+    patient_contact: str | None = None,
+) -> dict:
+    if not customer_name and not patient_contact:
         return {
             "customer_type": None,
             "ambiguous": False,
@@ -669,7 +885,11 @@ def _resolve_history_customer_type(customer_name: str | None, birth_date: str | 
         }
 
     try:
-        return resolve_customer_type_from_history(customer_name, birth_date=birth_date)
+        return resolve_customer_type_from_history(
+            customer_name,
+            birth_date=birth_date,
+            patient_contact=patient_contact,
+        )
     except Exception:
         return {
             "customer_type": None,
@@ -706,6 +926,90 @@ def _determine_missing_info(
     return missing
 
 
+def _determine_dialogue_missing_info(
+    *,
+    action: str,
+    slots: dict,
+    is_chat: bool,
+    is_proxy_booking: bool | None,
+    patient_name: str | None,
+    patient_contact: str | None,
+    customer_name: str | None,
+    birth_date: str | None,
+    history_resolution: dict | None,
+) -> list[str]:
+    missing: list[str] = []
+
+    if action not in BOOKING_RELATED_ACTIONS:
+        return []
+
+    if is_chat and is_proxy_booking is None:
+        missing.append("is_proxy_booking")
+
+    effective_name = patient_name or (customer_name if is_proxy_booking is False else None)
+    if is_chat:
+        if not effective_name:
+            missing.append("patient_name")
+        if not patient_contact:
+            missing.append("patient_contact")
+    else:
+        if is_proxy_booking and not patient_name:
+            missing.append("patient_name")
+        if is_proxy_booking and not patient_contact:
+            missing.append("patient_contact")
+
+    if action == "book_appointment":
+        if not slots.get("department"):
+            missing.append("department")
+        if not slots.get("date"):
+            missing.append("date")
+        if not slots.get("time"):
+            missing.append("time")
+
+    if not customer_name and patient_name and is_proxy_booking is False:
+        customer_name = patient_name
+
+    if action == "book_appointment" and not customer_name and not patient_name and not is_chat:
+        missing.append("customer_name")
+
+    if history_resolution and history_resolution.get("ambiguous") and not birth_date:
+        missing.append("birth_date")
+
+    return _prioritize_missing_info(missing)
+
+
+def _build_alternative_slot_question(alternative_slots: list[str], now: datetime) -> str:
+    options: list[str] = []
+    for index, slot in enumerate(alternative_slots, start=1):
+        options.append(f"{index}) {build_success_message('check_appointment', appointment={'booking_time': slot}, now=now).replace('확인된 예약은 ', '').replace('입니다.', '')}")
+    return "요청하신 시간은 어렵습니다. 가능한 다른 시간 중 원하시는 번호를 선택해주세요. " + ", ".join(options)
+
+
+def _resolve_alternative_slot_selection(message: str, alternative_slots: list[str]) -> str | None:
+    text = _normalize_text(message)
+    number_match = re.search(r"(\d+)", text)
+    if not number_match:
+        return None
+    index = int(number_match.group(1)) - 1
+    if 0 <= index < len(alternative_slots):
+        return alternative_slots[index]
+    return None
+
+
+def _update_slots_from_booking_time(session_state: dict | None, booking_time: str, now: datetime) -> dict:
+    appointment_like = {"booking_time": booking_time}
+    slots = _extract_candidate_slots(appointment_like, now)
+    if session_state is not None:
+        current = session_state.get("accumulated_slots", {})
+        session_state["accumulated_slots"] = {
+            "department": current.get("department"),
+            "date": slots.get("date"),
+            "time": slots.get("time"),
+        }
+        return dict(session_state["accumulated_slots"])
+    return slots
+
+
 def _consume_pending_identity_input(
     user_message: str,
     ticket: dict,
@@ -714,57 +1018,125 @@ def _consume_pending_identity_input(
     if session_state is None:
         return None, None
 
-    pending_missing_info = list(session_state.get("pending_missing_info") or [])
+    pending_missing_info = _get_pending_missing_info(session_state)
     if not pending_missing_info:
         return None, None
 
-    identity_missing = any(field in pending_missing_info for field in ["customer_name", "birth_date"])
+    identity_missing = any(
+        field in pending_missing_info
+        for field in ["is_proxy_booking", "patient_name", "patient_contact", "customer_name", "birth_date"]
+    )
     if not identity_missing:
         return None, None
 
     consumed_identity = False
 
-    if "customer_name" in pending_missing_info and not _get_effective_customer_name(ticket, session_state):
-        patient_name = _extract_patient_name(user_message)
-        if not patient_name:
+    if "is_proxy_booking" in pending_missing_info and _get_effective_proxy_booking(ticket, session_state) is None:
+        parsed_proxy = _parse_proxy_answer(user_message)
+        if parsed_proxy is None:
+            _increment_clarify_turn_count(session_state)
+            if _should_escalate_for_clarify_limit(session_state, ["is_proxy_booking"]):
+                return (
+                    _build_response_and_record(
+                        session_state,
+                        action="escalate",
+                        message="본인 여부 확인이 반복되어 상담원이 이어서 도와드리겠습니다.",
+                        ticket=ticket,
+                        classified_intent="escalate",
+                        intent_result={"action": "escalate", "missing_info": ["is_proxy_booking"]},
+                        customer_type=None,
+                    ),
+                    None,
+                )
             return (
                 _build_response_and_record(
                     session_state,
                     action="clarify",
-                    message=build_missing_info_question(["customer_name"], action_context="book_appointment"),
+                    message=build_missing_info_question(["is_proxy_booking"], action_context=session_state.get("pending_action")),
                     ticket=ticket,
                     classified_intent="clarify",
-                    intent_result={"action": "clarify", "missing_info": ["customer_name"]},
+                    intent_result={"action": "clarify", "missing_info": ["is_proxy_booking"]},
                     customer_type=None,
                 ),
                 None,
             )
-        session_state["customer_name"] = patient_name
-        ticket["customer_name"] = patient_name
-        pending_missing_info = [item for item in pending_missing_info if item != "customer_name"]
+        session_state["is_proxy_booking"] = parsed_proxy
+        ticket["is_proxy_booking"] = parsed_proxy
+        if parsed_proxy is False and not session_state.get("patient_name"):
+            inferred_name = ticket.get("customer_name") or session_state.get("customer_name")
+            if inferred_name:
+                session_state["patient_name"] = inferred_name
+                ticket["patient_name"] = inferred_name
+                pending_missing_info = [item for item in pending_missing_info if item != "patient_name"]
+        pending_missing_info = [item for item in pending_missing_info if item != "is_proxy_booking"]
         consumed_identity = True
+
+    if "patient_name" in pending_missing_info and not _get_effective_patient_name(ticket, session_state):
+        patient_name = _extract_patient_name(user_message)
+        if patient_name:
+            session_state["patient_name"] = patient_name
+            ticket["patient_name"] = patient_name
+            if session_state.get("is_proxy_booking") is False:
+                session_state.setdefault("customer_name", patient_name)
+                ticket.setdefault("customer_name", patient_name)
+            pending_missing_info = [item for item in pending_missing_info if item != "patient_name"]
+            consumed_identity = True
+
+    if "patient_contact" in pending_missing_info and not _get_effective_patient_contact(ticket, session_state):
+        patient_contact = _extract_patient_contact(user_message)
+        if patient_contact:
+            session_state["patient_contact"] = patient_contact
+            ticket["patient_contact"] = patient_contact
+            pending_missing_info = [item for item in pending_missing_info if item != "patient_contact"]
+            consumed_identity = True
+
+    if "customer_name" in pending_missing_info and not _get_effective_customer_name(ticket, session_state):
+        patient_name = _extract_patient_name(user_message)
+        if patient_name:
+            session_state["customer_name"] = patient_name
+            ticket["customer_name"] = patient_name
+            pending_missing_info = [item for item in pending_missing_info if item != "customer_name"]
+            consumed_identity = True
 
     if "birth_date" in pending_missing_info and not _get_effective_birth_date(ticket, session_state):
         parsed_birth_date = _extract_birth_date(user_message)
-        if not parsed_birth_date:
+        if parsed_birth_date:
+            session_state["birth_date"] = parsed_birth_date
+            ticket["birth_date"] = parsed_birth_date
+            pending_missing_info = [item for item in pending_missing_info if item != "birth_date"]
+            consumed_identity = True
+
+    session_state["pending_missing_info_queue"] = list(pending_missing_info)
+    session_state["pending_missing_info"] = list(pending_missing_info)
+
+    if pending_missing_info:
+        _increment_clarify_turn_count(session_state)
+        if _should_escalate_for_clarify_limit(session_state, pending_missing_info):
             return (
                 _build_response_and_record(
                     session_state,
-                    action="clarify",
-                    message=build_missing_info_question(["birth_date"], action_context="book_appointment"),
+                    action="escalate",
+                    message="필수 정보를 여러 차례 확인했지만 부족하여 상담원이 이어서 도와드리겠습니다.",
                     ticket=ticket,
-                    classified_intent="clarify",
-                    intent_result={"action": "clarify", "missing_info": ["birth_date"]},
+                    classified_intent="escalate",
+                    intent_result={"action": "escalate", "missing_info": pending_missing_info},
                     customer_type=None,
                 ),
                 None,
             )
-        session_state["birth_date"] = parsed_birth_date
-        ticket["birth_date"] = parsed_birth_date
-        pending_missing_info = [item for item in pending_missing_info if item != "birth_date"]
-        consumed_identity = True
+        return (
+            _build_response_and_record(
+                session_state,
+                action="clarify",
+                message=build_missing_info_question(pending_missing_info, action_context=session_state.get("pending_action")),
+                ticket=ticket,
+                classified_intent="clarify",
+                intent_result={"action": "clarify", "missing_info": pending_missing_info},
+                customer_type=None,
+            ),
+            None,
+        )
 
-    session_state["pending_missing_info"] = pending_missing_info
     if consumed_identity:
         slots = session_state.get("accumulated_slots", {})
         return None, {
@@ -772,6 +1144,10 @@ def _consume_pending_identity_input(
             "department": slots.get("department"),
             "date": slots.get("date"),
             "time": slots.get("time"),
+            "patient_name": session_state.get("patient_name"),
+            "patient_contact": session_state.get("patient_contact"),
+            "birth_date": session_state.get("birth_date"),
+            "is_proxy_booking": session_state.get("is_proxy_booking"),
             "missing_info": [],
         }
 
@@ -854,22 +1230,38 @@ def _load_storage_appointments(customer_name: str | None, birth_date: str | None
 
 def _find_customer_appointments(ticket: dict, all_appointments: list[dict], existing_appointment: dict | None) -> list[dict]:
     customer_name = ticket.get("customer_name")
-    birth_date = ticket.get("birth_date")
-    storage_matches = _load_storage_appointments(customer_name, birth_date)
+    patient_name = ticket.get("patient_name") or customer_name
+    birth_date = normalize_birth_date(ticket.get("birth_date"))
+    patient_contact = _format_patient_contact(ticket.get("patient_contact"))
 
-    if customer_name:
-        matches = [
-            appointment
-            for appointment in all_appointments
-            if appointment.get("customer_name") == customer_name
-            and (not birth_date or normalize_birth_date(appointment.get("birth_date")) == normalize_birth_date(birth_date))
-        ]
-        merged_matches = _merge_appointment_sources(storage_matches, matches)
-        if merged_matches:
-            return merged_matches
+    try:
+        if patient_contact:
+            storage_matches = find_bookings(patient_contact=patient_contact)
+        else:
+            storage_matches = _load_storage_appointments(patient_name, birth_date)
+    except Exception:
+        storage_matches = []
 
-    if storage_matches:
-        return storage_matches
+    matches = []
+    for appointment in all_appointments:
+        appointment_contact = _format_patient_contact(appointment.get("patient_contact"))
+        appointment_name = appointment.get("patient_name") or appointment.get("customer_name")
+        appointment_birth_date = normalize_birth_date(appointment.get("birth_date"))
+
+        if patient_contact:
+            if appointment_contact != patient_contact:
+                continue
+        else:
+            if patient_name and appointment_name != patient_name and appointment.get("customer_name") != patient_name:
+                continue
+            if birth_date and appointment_birth_date != birth_date:
+                continue
+        matches.append(appointment)
+
+    merged_matches = _merge_appointment_sources(storage_matches, matches)
+    if merged_matches:
+        return merged_matches
+
     if existing_appointment:
         return [existing_appointment]
     return []
@@ -990,8 +1382,9 @@ def process_ticket(
         now = datetime.now(timezone.utc)
     if all_appointments is None:
         all_appointments = _load_appointments_from_disk()
+    is_chat = session_state is not None
 
-    state = _init_session_state(session_state) if session_state is not None else None
+    state = _init_session_state(session_state) if is_chat else None
     ticket = dict(ticket)
     if ticket.get("birth_date"):
         ticket["birth_date"] = normalize_birth_date(ticket.get("birth_date"))
@@ -1002,6 +1395,12 @@ def process_ticket(
         if ticket.get("birth_date"):
             state["birth_date"] = normalize_birth_date(ticket.get("birth_date"))
             ticket["birth_date"] = state.get("birth_date")
+        if ticket.get("patient_name"):
+            state["patient_name"] = ticket.get("patient_name")
+        if ticket.get("patient_contact"):
+            state["patient_contact"] = _format_patient_contact(ticket.get("patient_contact"))
+        if ticket.get("is_proxy_booking") is not None:
+            state["is_proxy_booking"] = bool(ticket.get("is_proxy_booking"))
     existing_appointment = _resolve_existing_appointment_from_ticket(
         ticket,
         all_appointments,
@@ -1049,6 +1448,25 @@ def process_ticket(
             customer_type=customer_type,
         )
 
+    if state is not None and state.get("pending_alternative_slots"):
+        selected_slot = _resolve_alternative_slot_selection(user_message, state["pending_alternative_slots"])
+        if selected_slot is None:
+            _increment_clarify_turn_count(state)
+            return _build_response_and_record(
+                state,
+                action="clarify",
+                message=_build_alternative_slot_question(state["pending_alternative_slots"], now),
+                ticket=ticket,
+                classified_intent=state.get("pending_action") or "clarify",
+                intent_result={"action": state.get("pending_action") or "clarify", "missing_info": ["slot_selection"]},
+                customer_type=customer_type,
+            )
+        merged_slots = _update_slots_from_booking_time(state, selected_slot, now)
+        ticket["booking_time"] = selected_slot
+        ticket["date"] = merged_slots.get("date")
+        ticket["time"] = merged_slots.get("time")
+        state["pending_alternative_slots"] = None
+
     if state is not None:
         pending_confirmation_result = _handle_pending_confirmation(
             user_message,
@@ -1065,6 +1483,7 @@ def process_ticket(
         pending_action = state.get("pending_action") or "check_appointment"
         selected_existing_appointment = _resolve_candidate_selection(user_message, state["pending_candidates"], now)
         if selected_existing_appointment is None:
+            _increment_clarify_turn_count(state)
             message = build_appointment_options_question(pending_action, state["pending_candidates"], now)
             return _build_response_and_record(
                 state,
@@ -1114,6 +1533,8 @@ def process_ticket(
             "missing_info": [],
         }
 
+    _sync_identity_state_from_intent(ticket, state, intent_result, is_chat=is_chat)
+
     action = intent_result.get("action")
     inferred_action = _infer_requested_action(user_message)
     if action == "clarify":
@@ -1126,6 +1547,15 @@ def process_ticket(
         elif inferred_action == "book_appointment" and has_booking_slots:
             action = inferred_action
 
+    previous_pending_action = (state or {}).get("pending_action")
+    if (
+        state is not None
+        and previous_pending_action in BOOKING_RELATED_ACTIONS
+        and action in BOOKING_RELATED_ACTIONS
+        and previous_pending_action != action
+    ):
+        _reset_pending_flow_for_new_action(state, action)
+
     merged_slots = _merge_accumulated_slots(state, intent_result)
     department = merged_slots.get("department") or intent_result.get("department") or safety_result.get("department_hint")
     classified_intent = intent_result.get("action")
@@ -1133,45 +1563,79 @@ def process_ticket(
     if state is not None:
         state["pending_action"] = action
 
+    effective_proxy_booking = _get_effective_proxy_booking(ticket, state)
+    effective_patient_name = _get_effective_patient_name(ticket, state)
+    effective_patient_contact = _get_effective_patient_contact(ticket, state)
     effective_customer_name = _get_effective_customer_name(ticket, state)
+    if not effective_customer_name and effective_patient_name and effective_proxy_booking is False:
+        effective_customer_name = effective_patient_name
+        ticket["customer_name"] = effective_customer_name
+        if state is not None:
+            state["customer_name"] = effective_customer_name
     effective_birth_date = _get_effective_birth_date(ticket, state)
+
     history_resolution = None
-    if action == "book_appointment":
-        history_resolution = _resolve_history_customer_type(effective_customer_name, effective_birth_date)
+    if action in BOOKING_RELATED_ACTIONS:
+        history_resolution = _resolve_history_customer_type(
+            effective_patient_name or effective_customer_name,
+            effective_birth_date,
+            patient_contact=effective_patient_contact,
+        )
         if state is not None and effective_customer_name:
             state["customer_name"] = effective_customer_name
         if state is not None and effective_birth_date:
             state["birth_date"] = effective_birth_date
+        if state is not None and effective_patient_name:
+            state["patient_name"] = effective_patient_name
+        if state is not None and effective_patient_contact:
+            state["patient_contact"] = effective_patient_contact
 
-    if action == "book_appointment":
-        missing_info = _determine_missing_info(
-            action,
-            merged_slots,
-            customer_name=effective_customer_name,
-            birth_date=effective_birth_date,
-            history_resolution=history_resolution,
-        )
-        if missing_info:
-            if state is not None:
-                state["pending_missing_info"] = missing_info
-            question = build_missing_info_question(missing_info, department=department, action_context=action)
+    dialogue_missing_info = _determine_dialogue_missing_info(
+        action=action,
+        slots=merged_slots,
+        is_chat=is_chat,
+        is_proxy_booking=effective_proxy_booking,
+        patient_name=effective_patient_name,
+        patient_contact=effective_patient_contact,
+        customer_name=effective_customer_name,
+        birth_date=effective_birth_date,
+        history_resolution=history_resolution,
+    )
+    if dialogue_missing_info:
+        if _should_escalate_for_clarify_limit(state, dialogue_missing_info):
             return _build_response_and_record(
                 state,
-                action="clarify",
-                message=question,
+                action="escalate",
+                message="여러 차례 확인이 필요해 상담원이 이어서 도와드리는 것이 안전합니다. 상담원 연결을 도와드릴게요.",
                 department=department,
                 ticket=ticket,
                 classified_intent=classified_intent,
                 safety_result=safety_result,
-                intent_result={**intent_result, "action": "clarify", "department": department, "missing_info": missing_info},
+                intent_result={**intent_result, "action": action, "department": department, "missing_info": dialogue_missing_info},
                 customer_type=customer_type,
             )
+        _set_pending_missing_info(state, dialogue_missing_info)
+        _increment_clarify_turn_count(state)
+        return _build_response_and_record(
+            state,
+            action="clarify",
+            message=build_missing_info_question(dialogue_missing_info, department=department, action_context=action),
+            department=department,
+            ticket=ticket,
+            classified_intent=classified_intent,
+            safety_result=safety_result,
+            intent_result={**intent_result, "action": action, "department": department, "missing_info": dialogue_missing_info},
+            customer_type=customer_type,
+        )
+
+    _set_pending_missing_info(state, [])
 
     if action == "clarify":
         if department:
             message = f"{department} 예약을 도와드릴 수 있습니다. 원하시는 날짜와 시간을 알려주시겠어요?"
         else:
             message = "예약 관련하여 더 자세한 정보가 필요합니다. 원하시는 날짜, 시간, 진료과를 알려주시겠어요?"
+        _increment_clarify_turn_count(state)
         return _build_response_and_record(
             state,
             action="clarify",
@@ -1188,6 +1652,8 @@ def process_ticket(
         customer_type = (history_resolution or {}).get("customer_type")
         if state is not None:
             state["resolved_customer_type"] = customer_type
+        if customer_type:
+            ticket["customer_type"] = customer_type
 
     booking_time = _build_booking_time(merged_slots.get("date"), merged_slots.get("time"), now)
     target_existing_appointment = selected_existing_appointment or existing_appointment
@@ -1219,6 +1685,9 @@ def process_ticket(
         **intent_result,
         "action": action,
         "customer_name": effective_customer_name,
+        "patient_name": effective_patient_name,
+        "patient_contact": effective_patient_contact,
+        "is_proxy_booking": effective_proxy_booking,
         "birth_date": effective_birth_date,
         "department": department,
         "date": merged_slots.get("date"),
@@ -1233,10 +1702,40 @@ def process_ticket(
         recommended_action = policy_result.get("recommended_action")
         message = policy_result["reason"]
         alternatives = policy_result.get("alternative_slots") or []
+        if alternatives and is_chat and recommended_action == "clarify":
+            if _should_escalate_for_clarify_limit(state, ["slot_selection"]):
+                return _build_response_and_record(
+                    state,
+                    action="escalate",
+                    message="대체 시간 확인이 길어져 상담원이 이어서 도와드리겠습니다.",
+                    department=department,
+                    ticket=ticket,
+                    classified_intent=classified_intent,
+                    safety_result=safety_result,
+                    intent_result=intent_payload,
+                    policy_result=policy_result,
+                    customer_type=customer_type,
+                )
+            state["pending_alternative_slots"] = alternatives
+            _set_pending_missing_info(state, ["slot_selection"])
+            _increment_clarify_turn_count(state)
+            return _build_response_and_record(
+                state,
+                action="clarify",
+                message=_build_alternative_slot_question(alternatives, now),
+                department=department,
+                ticket=ticket,
+                classified_intent=classified_intent,
+                safety_result=safety_result,
+                intent_result={**intent_payload, "missing_info": ["slot_selection"]},
+                policy_result=policy_result,
+                customer_type=customer_type,
+            )
         if alternatives:
             message = f"{message} 가능한 다른 시간은 {', '.join(alternatives)} 입니다."
 
         if recommended_action == "clarify":
+            _increment_clarify_turn_count(state)
             return _build_response_and_record(
                 state,
                 action="clarify",
@@ -1280,6 +1779,9 @@ def process_ticket(
     if action == "book_appointment":
         appointment = {
             "customer_name": effective_customer_name,
+            "patient_name": effective_patient_name or effective_customer_name,
+            "patient_contact": effective_patient_contact,
+            "is_proxy_booking": bool(effective_proxy_booking),
             "birth_date": effective_birth_date,
             "department": department,
             "date": merged_slots.get("date"),
@@ -1289,6 +1791,7 @@ def process_ticket(
         }
         if state is not None:
             state["pending_confirmation"] = {"action": "book_appointment", "appointment": appointment}
+        _set_pending_missing_info(state, [])
         message = build_confirmation_question(appointment, now)
         return _build_response_and_record(
             state,
@@ -1365,6 +1868,9 @@ def process_message(user_message: str, session: dict | None = None, now: datetim
         now=now,
     )
     session["customer_name"] = dialogue_state.get("customer_name") or session.get("customer_name")
+    session["patient_name"] = dialogue_state.get("patient_name") or session.get("patient_name")
+    session["patient_contact"] = dialogue_state.get("patient_contact") or session.get("patient_contact")
+    session["is_proxy_booking"] = dialogue_state.get("is_proxy_booking")
     session["birth_date"] = dialogue_state.get("birth_date") or session.get("birth_date")
     session["customer_type"] = dialogue_state.get("resolved_customer_type") or session.get("customer_type")
     session["last_result"] = result

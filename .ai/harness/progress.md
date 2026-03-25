@@ -100,15 +100,22 @@
 
 ## Current Status
 
+- Phase 4 — Dialogue state / patient identity 구현 완료
+  - `src/agent.py`에 본인/대리인 우선 확인(`is_proxy_booking`), 환자 본인 정보 수집(`patient_name`, `patient_contact`), `pending_missing_info_queue`, `clarify_turn_count`, 대체 슬롯 선택 상태, 최종 확인 후 영속화 흐름을 반영
+  - chat 모드에서는 예약성 액션(book/modify/cancel/check) 시작 시 상태머신을 통해 본인/대리인 확인을 최우선 수행하고, batch 모드에서는 공통 agent core를 유지하면서 단일 턴 폴백을 적용
+  - `tests/test_dialogue.py`를 F-031~F-033, F-041~F-048 기준으로 재작성하여 본인/대리인 확인, 멀티턴 누적, 4턴 상한, 대체 슬롯 선택, 최종 확인 후 저장, chat/run 공통 코어 계약을 검증
+  - 검증 완료: `python3 -m pytest tests/test_dialogue.py tests/test_safety.py tests/test_storage.py` → **54 passed**, `python3 -m pytest tests/test_classifier.py tests/test_batch.py` → **19 passed**
+  - `.ai/harness/features.json`에서 `F-031~F-033`, `F-041~F-048` `passes: true` 반영 완료
+
 - Safety gate / classifier / LLM 예외 방어 구현 완료
   - `src/classifier.py`에서 7개 action enum 강제, 불확실 시 `clarify` 폴백, 날짜/시간/분과/의사/환자정보/대리예약/응급 신호/기존 예약 힌트 추출까지 반영
   - `src/llm_client.py`에서 Ollama `qwen3-coder:30b` 호출 시 `format='json'`을 강제하고, connection refused / timeout / JSON 파싱 오류 / 잘못된 응답 구조에 대해 거짓 성공 없이 `clarify` 중심 안전 폴백 적용
   - `tests/test_classifier.py`, `tests/test_safety.py` 회귀 검증을 통과했고 harness에는 `F-011 ~ F-014`, `F-021 ~ F-030`, `F-083 ~ F-084` 상태를 반영 완료
 
 - Next step
-  - `src/agent.py` 대화 상태에 `is_proxy_booking`, `patient_name`, `patient_contact`를 본격 반영하여 본인/대리인 확인 및 세션 중간 상태 수집 흐름을 구현
-  - confirmation 직전 storage fresh recheck를 agent 예약 확정 흐름과 직접 연결
-  - dialogue / patient identity 중심의 후속 Phase 구현을 계속 진행
+  - 운영시간/점심시간/휴진일 경계값을 포함한 policy Phase 2 요구사항 보강
+  - confirmation 직전 storage fresh recheck를 대화형 예약 확정 흐름과 더 정밀하게 연결
+  - 남은 metrics/docs 산출물과 선택 과제(cal.com) 정합성 검증
 
 ### Documentation update completed (2026-03-25)
 - `docs/policy_digest.md` 업데이트 완료

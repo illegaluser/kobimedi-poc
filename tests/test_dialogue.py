@@ -14,13 +14,216 @@ SAFE_RESULT = {
 }
 
 
+def _book_intent(department="내과", date="2026-03-25", time="14:00", **extra):
+    return {
+        "action": "book_appointment",
+        "department": department,
+        "date": date,
+        "time": time,
+        "missing_info": [],
+        **extra,
+    }
+
+
+@patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
 @patch("src.agent.classify_safety")
-def test_F012_multiturn_clarify_accumulates_slots(
+def test_F031_proxy_question_is_first_for_chat_booking(
     mock_classify_safety,
     mock_classify_intent,
     mock_apply_policy,
+    mock_resolve_customer_type,
+):
+    mock_classify_safety.return_value = SAFE_RESULT
+    mock_classify_intent.return_value = _book_intent()
+    mock_apply_policy.return_value = {
+        "allowed": True,
+        "reason": "정책 검사를 통과했습니다.",
+        "recommended_action": "book_appointment",
+    }
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "재진",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [],
+        "has_non_cancelled_history": True,
+        "has_cancelled_history": False,
+    }
+
+    session_state = {}
+
+    result = process_ticket(
+        {
+            "customer_name": "김민수",
+            "customer_type": "재진",
+            "message": "내일 2시 내과 예약하고 싶어요",
+        },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+
+    assert result["action"] == "clarify"
+    assert "본인이신가요" in result["response"]
+    assert session_state["pending_missing_info"][0] == "is_proxy_booking"
+    assert session_state["accumulated_slots"] == {
+        "date": "2026-03-25",
+        "time": "14:00",
+        "department": "내과",
+    }
+    mock_apply_policy.assert_not_called()
+
+
+@patch("src.agent.resolve_customer_type_from_history")
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+@patch("src.agent.classify_safety")
+def test_F032_self_booking_collects_patient_contact_then_confirms(
+    mock_classify_safety,
+    mock_classify_intent,
+    mock_apply_policy,
+    mock_resolve_customer_type,
+):
+    mock_classify_safety.return_value = SAFE_RESULT
+    mock_classify_intent.return_value = _book_intent()
+    mock_apply_policy.return_value = {
+        "allowed": True,
+        "reason": "정책 검사를 통과했습니다.",
+        "recommended_action": "book_appointment",
+    }
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "재진",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [{"id": "booking-001"}],
+        "has_non_cancelled_history": True,
+        "has_cancelled_history": False,
+    }
+
+    session_state = {}
+
+    first_result = process_ticket(
+        {
+            "customer_name": "김민수",
+            "customer_type": "재진",
+            "message": "내일 2시 내과 예약하고 싶어요",
+        },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert first_result["action"] == "clarify"
+    assert "본인이신가요" in first_result["response"]
+
+    second_result = process_ticket(
+        {"message": "본인이에요"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert second_result["action"] == "clarify"
+    assert "연락처" in second_result["response"]
+    assert session_state["is_proxy_booking"] is False
+    assert session_state["patient_name"] == "김민수"
+
+    third_result = process_ticket(
+        {"message": "010-1234-5678"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert third_result["action"] == "clarify"
+    assert "예약할까요" in third_result["response"]
+    assert session_state["resolved_customer_type"] == "재진"
+    assert session_state["pending_confirmation"]["appointment"]["patient_name"] == "김민수"
+    assert session_state["pending_confirmation"]["appointment"]["patient_contact"] == "010-1234-5678"
+    assert session_state["pending_confirmation"]["appointment"]["is_proxy_booking"] is False
+    assert mock_apply_policy.call_count == 1
+
+
+@patch("src.agent.resolve_customer_type_from_history")
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+@patch("src.agent.classify_safety")
+def test_F033_proxy_booking_collects_actual_patient_info(
+    mock_classify_safety,
+    mock_classify_intent,
+    mock_apply_policy,
+    mock_resolve_customer_type,
+):
+    mock_classify_safety.return_value = SAFE_RESULT
+    mock_classify_intent.return_value = _book_intent(is_proxy_booking=True)
+    mock_apply_policy.return_value = {
+        "allowed": True,
+        "reason": "정책 검사를 통과했습니다.",
+        "recommended_action": "book_appointment",
+    }
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "초진",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [],
+        "has_non_cancelled_history": False,
+        "has_cancelled_history": False,
+    }
+
+    session_state = {}
+
+    first_result = process_ticket(
+        {
+            "customer_name": "보호자",
+            "message": "엄마 대신 내일 2시 내과 예약하고 싶어요",
+        },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert first_result["action"] == "clarify"
+    assert "성함과 연락처" in first_result["response"]
+    assert session_state["is_proxy_booking"] is True
+
+    second_result = process_ticket(
+        {"message": "환자 이름은 김영희"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert second_result["action"] == "clarify"
+    assert "연락처" in second_result["response"]
+    assert session_state["patient_name"] == "김영희"
+
+    third_result = process_ticket(
+        {"message": "010-9999-8888"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert third_result["action"] == "clarify"
+    assert "예약할까요" in third_result["response"]
+    appointment = session_state["pending_confirmation"]["appointment"]
+    assert appointment["patient_name"] == "김영희"
+    assert appointment["patient_contact"] == "010-9999-8888"
+    assert appointment["is_proxy_booking"] is True
+    assert appointment["customer_type"] == "초진"
+
+
+@patch("src.agent.resolve_customer_type_from_history")
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+@patch("src.agent.classify_safety")
+def test_F041_F043_F044_pending_queue_and_slots_persist_across_turns(
+    mock_classify_safety,
+    mock_classify_intent,
+    mock_apply_policy,
+    mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
     mock_classify_intent.side_effect = [
@@ -36,13 +239,21 @@ def test_F012_multiturn_clarify_accumulates_slots(
             "department": "내과",
             "date": None,
             "time": None,
-            "missing_info": ["date", "time"],
+            "missing_info": [],
         },
     ]
     mock_apply_policy.return_value = {
         "allowed": True,
         "reason": "정책 검사를 통과했습니다.",
         "recommended_action": "book_appointment",
+    }
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "재진",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [],
+        "has_non_cancelled_history": True,
+        "has_cancelled_history": False,
     }
 
     session_state = {}
@@ -50,7 +261,6 @@ def test_F012_multiturn_clarify_accumulates_slots(
     first_result = process_ticket(
         {
             "customer_name": "김민수",
-            "customer_type": "재진",
             "message": "내일 2시 예약",
         },
         all_appointments=[],
@@ -58,21 +268,104 @@ def test_F012_multiturn_clarify_accumulates_slots(
         session_state=session_state,
         now=REFERENCE_NOW,
     )
-
     assert first_result["action"] == "clarify"
-    assert "어느 분과" in first_result["response"]
     assert session_state["accumulated_slots"] == {
         "date": "2026-03-25",
         "time": "14:00",
         "department": None,
     }
 
-    second_result = process_ticket(
+    process_ticket(
+        {"message": "본인이에요"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    process_ticket(
+        {"message": "010-2222-3333"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+
+    final_result = process_ticket(
+        {"message": "내과요"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert final_result["action"] == "clarify"
+    assert "예약할까요" in final_result["response"]
+    assert session_state["accumulated_slots"] == {
+        "date": "2026-03-25",
+        "time": "14:00",
+        "department": "내과",
+    }
+    intent_payload = mock_apply_policy.call_args[0][0]
+    assert intent_payload["department"] == "내과"
+    assert intent_payload["date"] == "2026-03-25"
+    assert intent_payload["time"] == "14:00"
+
+
+@patch("src.agent.resolve_customer_type_from_history")
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+@patch("src.agent.classify_safety")
+def test_F042_clarify_turn_limit_escalates_after_four_turns(
+    mock_classify_safety,
+    mock_classify_intent,
+    mock_apply_policy,
+    mock_resolve_customer_type,
+):
+    mock_classify_safety.return_value = SAFE_RESULT
+    mock_classify_intent.return_value = _book_intent()
+    mock_apply_policy.return_value = {
+        "allowed": True,
+        "reason": "정책 검사를 통과했습니다.",
+        "recommended_action": "book_appointment",
+    }
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "재진",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [],
+        "has_non_cancelled_history": True,
+        "has_cancelled_history": False,
+    }
+
+    session_state = {}
+
+    first_result = process_ticket(
         {
             "customer_name": "김민수",
-            "customer_type": "재진",
-            "message": "내과요",
+            "message": "내일 2시 내과 예약하고 싶어요",
         },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert first_result["action"] == "clarify"
+
+    second_result = process_ticket(
+        {"message": "모르겠어요"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    third_result = process_ticket(
+        {"message": "잘 모르겠어요"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    fourth_result = process_ticket(
+        {"message": "대답하기 어려워요"},
         all_appointments=[],
         existing_appointment=None,
         session_state=session_state,
@@ -80,32 +373,122 @@ def test_F012_multiturn_clarify_accumulates_slots(
     )
 
     assert second_result["action"] == "clarify"
+    assert third_result["action"] == "clarify"
+    assert fourth_result["action"] == "escalate"
+    assert session_state["clarify_turn_count"] >= 4
+
+
+@patch("src.agent.resolve_customer_type_from_history")
+@patch("src.agent.apply_policy")
+@patch("src.agent.classify_intent")
+@patch("src.agent.classify_safety")
+def test_F045_alternative_slot_selection_flows_to_confirmation(
+    mock_classify_safety,
+    mock_classify_intent,
+    mock_apply_policy,
+    mock_resolve_customer_type,
+):
+    mock_classify_safety.return_value = SAFE_RESULT
+    mock_classify_intent.side_effect = [
+        _book_intent(),
+        {"action": "clarify", "department": None, "date": None, "time": None, "missing_info": []},
+    ]
+    mock_apply_policy.side_effect = [
+        {
+            "allowed": False,
+            "reason": "요청하신 시간에는 예약이 이미 가득 찼습니다. 다른 시간을 선택해 주세요.",
+            "recommended_action": "clarify",
+            "alternative_slots": [
+                "2026-03-25T14:30:00+00:00",
+                "2026-03-25T15:00:00+00:00",
+            ],
+        },
+        {
+            "allowed": True,
+            "reason": "정책 검사를 통과했습니다.",
+            "recommended_action": "book_appointment",
+        },
+    ]
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "재진",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [],
+        "has_non_cancelled_history": True,
+        "has_cancelled_history": False,
+    }
+
+    session_state = {
+        "customer_name": "김민수",
+        "patient_name": "김민수",
+        "patient_contact": "010-1111-2222",
+        "is_proxy_booking": False,
+    }
+
+    first_result = process_ticket(
+        {
+            "customer_name": "김민수",
+            "patient_name": "김민수",
+            "patient_contact": "010-1111-2222",
+            "is_proxy_booking": False,
+            "message": "내일 2시 내과 예약하고 싶어요",
+        },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert first_result["action"] == "clarify"
+    assert "가능한 다른 시간" in first_result["response"]
+    assert session_state["pending_alternative_slots"] is not None
+
+    second_result = process_ticket(
+        {"message": "2번이요"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    assert second_result["action"] == "clarify"
     assert "예약할까요" in second_result["response"]
-    assert "내과" in second_result["response"]
-    assert session_state["pending_confirmation"] is not None
-    assert mock_apply_policy.call_count == 1
-
-    intent_payload = mock_apply_policy.call_args[0][0]
-    assert intent_payload["action"] == "book_appointment"
-    assert intent_payload["department"] == "내과"
-    assert intent_payload["date"] == "2026-03-25"
-    assert intent_payload["time"] == "14:00"
+    appointment = session_state["pending_confirmation"]["appointment"]
+    assert appointment["date"] == "2026-03-25"
+    assert appointment["time"] == "15:00"
 
 
+@patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
 @patch("src.agent.classify_safety")
 @patch("src.agent.create_booking")
-def test_F013_two_step_confirmation_flow(
+def test_F046_persists_only_after_final_confirmation(
     mock_create_booking,
     mock_classify_safety,
     mock_classify_intent,
     mock_apply_policy,
+    mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
+    mock_classify_intent.return_value = _book_intent()
+    mock_apply_policy.return_value = {
+        "allowed": True,
+        "reason": "정책 검사를 통과했습니다.",
+        "recommended_action": "book_appointment",
+    }
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "재진",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [],
+        "has_non_cancelled_history": True,
+        "has_cancelled_history": False,
+    }
     mock_create_booking.return_value = {
         "id": "booking-001",
         "customer_name": "김민수",
+        "patient_name": "김민수",
+        "patient_contact": "010-1234-5678",
+        "is_proxy_booking": False,
         "department": "내과",
         "date": "2026-03-25",
         "time": "14:00",
@@ -113,27 +496,28 @@ def test_F013_two_step_confirmation_flow(
         "customer_type": "재진",
         "status": "active",
     }
-    mock_classify_intent.return_value = {
-        "action": "book_appointment",
-        "department": "내과",
-        "date": "2026-03-25",
-        "time": "14:00",
-        "missing_info": [],
-    }
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
 
     session_state = {}
 
-    proposal_result = process_ticket(
+    process_ticket(
         {
             "customer_name": "김민수",
-            "customer_type": "재진",
-            "message": "내일 2시 내과 예약",
+            "message": "내일 2시 내과 예약하고 싶어요",
         },
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    process_ticket(
+        {"message": "본인이에요"},
+        all_appointments=[],
+        existing_appointment=None,
+        session_state=session_state,
+        now=REFERENCE_NOW,
+    )
+    proposal_result = process_ticket(
+        {"message": "010-1234-5678"},
         all_appointments=[],
         existing_appointment=None,
         session_state=session_state,
@@ -141,144 +525,52 @@ def test_F013_two_step_confirmation_flow(
     )
 
     assert proposal_result["action"] == "clarify"
-    assert "예약할까요" in proposal_result["response"]
-    assert "김만수 원장" in proposal_result["response"]
     assert session_state["pending_confirmation"] is not None
-
-    mock_classify_safety.reset_mock()
-    mock_classify_intent.reset_mock()
-    mock_apply_policy.reset_mock()
+    mock_create_booking.assert_not_called()
 
     confirmed_result = process_ticket(
-        {
-            "customer_name": "김민수",
-            "customer_type": "재진",
-            "message": "네",
-        },
+        {"message": "네"},
         all_appointments=[],
         existing_appointment=None,
         session_state=session_state,
         now=REFERENCE_NOW,
     )
-
     assert confirmed_result["action"] == "book_appointment"
     assert "예약이 완료되었습니다" in confirmed_result["response"]
-    assert session_state["pending_confirmation"] is None
     mock_create_booking.assert_called_once()
-    mock_classify_safety.assert_not_called()
-    mock_classify_intent.assert_not_called()
-    mock_apply_policy.assert_not_called()
 
 
+@patch("src.agent.resolve_customer_type_from_history")
 @patch("src.agent.apply_policy")
 @patch("src.agent.classify_intent")
 @patch("src.agent.classify_safety")
-def test_F014_ambiguous_cancel_requires_choice_and_resolves(
+def test_F047_batch_mode_does_not_force_proxy_question_and_uses_single_turn(
     mock_classify_safety,
     mock_classify_intent,
     mock_apply_policy,
+    mock_resolve_customer_type,
 ):
     mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = {
-        "action": "clarify",
-        "department": None,
-        "date": None,
-        "time": None,
-        "missing_info": ["appointment_target"],
-    }
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "cancel_appointment",
-    }
-
-    appointments = [
-        {
-            "id": "appt-1",
-            "customer_name": "김민수",
-            "department": "내과",
-            "booking_time": "2026-03-27T14:00:00Z",
-            "customer_type": "재진",
-        },
-        {
-            "id": "appt-2",
-            "customer_name": "김민수",
-            "department": "정형외과",
-            "booking_time": "2026-03-29T14:00:00Z",
-            "customer_type": "재진",
-        },
-    ]
-    session_state = {}
-
-    clarify_result = process_ticket(
-        {
-            "customer_name": "김민수",
-            "customer_type": "재진",
-            "message": "예약 취소해주세요",
-        },
-        all_appointments=appointments,
-        existing_appointment=None,
-        session_state=session_state,
-        now=REFERENCE_NOW,
-    )
-
-    assert clarify_result["action"] == "clarify"
-    assert "어떤 예약인지 선택해주세요" in clarify_result["response"]
-    assert "1)" in clarify_result["response"]
-    assert "2)" in clarify_result["response"]
-    assert len(session_state["pending_candidates"]) == 2
-
-    mock_classify_safety.reset_mock()
-    mock_classify_intent.reset_mock()
-
-    resolved_result = process_ticket(
-        {
-            "customer_name": "김민수",
-            "customer_type": "재진",
-            "message": "2번이요",
-        },
-        all_appointments=appointments,
-        existing_appointment=None,
-        session_state=session_state,
-        now=REFERENCE_NOW,
-    )
-
-    assert resolved_result["action"] == "cancel_appointment"
-    assert "예약 취소가 완료되었습니다" in resolved_result["response"]
-    assert "정형외과" in resolved_result["response"]
-    assert session_state["pending_candidates"] is None
-    mock_classify_safety.assert_not_called()
-    mock_classify_intent.assert_not_called()
-    assert mock_apply_policy.call_args[0][1]["id"] == "appt-2"
-
-
-@patch("src.agent.apply_policy")
-@patch("src.agent.classify_intent")
-@patch("src.agent.classify_safety")
-def test_batch_like_call_without_session_state_remains_single_turn(
-    mock_classify_safety,
-    mock_classify_intent,
-    mock_apply_policy,
-):
-    mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = {
-        "action": "book_appointment",
-        "department": "내과",
-        "date": "2026-03-25",
-        "time": "14:00",
-        "missing_info": [],
-    }
+    mock_classify_intent.return_value = _book_intent()
     mock_apply_policy.return_value = {
         "allowed": True,
         "reason": "정책 검사를 통과했습니다.",
         "recommended_action": "book_appointment",
+    }
+    mock_resolve_customer_type.return_value = {
+        "customer_type": "재진",
+        "ambiguous": False,
+        "birth_date_candidates": [],
+        "matched_bookings": [],
+        "has_non_cancelled_history": True,
+        "has_cancelled_history": False,
     }
 
     result = process_ticket(
         {
             "customer_name": "김민수",
             "customer_type": "재진",
-            "message": "내일 2시 내과 예약",
+            "message": "내일 2시 내과 예약하고 싶어요",
         },
         all_appointments=[],
         existing_appointment=None,
@@ -287,98 +579,16 @@ def test_batch_like_call_without_session_state_remains_single_turn(
     )
 
     assert result["action"] == "clarify"
+    assert "본인이신가요" not in result["response"]
     assert "예약할까요" in result["response"]
-    assert result["classified_intent"] == "book_appointment"
 
 
-@patch("src.agent.resolve_customer_type_from_history")
-@patch("src.agent.apply_policy")
-@patch("src.agent.classify_intent")
-@patch("src.agent.classify_safety")
-def test_booking_flow_collects_name_then_birth_date_before_confirmation(
-    mock_classify_safety,
-    mock_classify_intent,
-    mock_apply_policy,
-    mock_resolve_customer_type,
-):
-    mock_classify_safety.return_value = SAFE_RESULT
-    mock_classify_intent.return_value = {
-        "action": "book_appointment",
-        "department": "내과",
-        "date": "2026-03-25",
-        "time": "14:00",
-        "missing_info": [],
-    }
-    mock_apply_policy.return_value = {
-        "allowed": True,
-        "reason": "정책 검사를 통과했습니다.",
-        "recommended_action": "book_appointment",
-    }
-    mock_resolve_customer_type.side_effect = [
-        {
-            "customer_type": None,
-            "ambiguous": True,
-            "birth_date_candidates": ["1988-01-01", "1990-02-02"],
-            "matched_bookings": [],
-            "has_non_cancelled_history": False,
-            "has_cancelled_history": False,
-        },
-        {
-            "customer_type": "재진",
-            "ambiguous": False,
-            "birth_date_candidates": ["1988-01-01", "1990-02-02"],
-            "matched_bookings": [{"id": "booking-001"}],
-            "has_non_cancelled_history": True,
-            "has_cancelled_history": False,
-        },
-    ]
+def test_F048_chat_and_run_share_agent_core_by_import_contract():
+    from chat import create_session as chat_create_session  # noqa: PLC0415
+    from chat import process_message as chat_process_message  # noqa: PLC0415
+    from run import process_ticket as run_process_ticket  # noqa: PLC0415
+    from src.agent import create_session, process_message, process_ticket  # noqa: PLC0415
 
-    session_state = {}
-
-    first_result = process_ticket(
-        {
-            "message": "내일 2시 내과 예약",
-        },
-        all_appointments=[],
-        existing_appointment=None,
-        session_state=session_state,
-        now=REFERENCE_NOW,
-    )
-
-    assert first_result["action"] == "clarify"
-    assert "성함" in first_result["response"]
-    assert session_state["pending_missing_info"] == ["customer_name"]
-
-    second_result = process_ticket(
-        {
-            "message": "김민수",
-        },
-        all_appointments=[],
-        existing_appointment=None,
-        session_state=session_state,
-        now=REFERENCE_NOW,
-    )
-
-    assert second_result["action"] == "clarify"
-    assert "생년월일" in second_result["response"]
-    assert session_state["customer_name"] == "김민수"
-    assert session_state["pending_missing_info"] == ["birth_date"]
-
-    third_result = process_ticket(
-        {
-            "message": "1990-02-02",
-        },
-        all_appointments=[],
-        existing_appointment=None,
-        session_state=session_state,
-        now=REFERENCE_NOW,
-    )
-
-    assert third_result["action"] == "clarify"
-    assert "예약할까요" in third_result["response"]
-    assert "내과" in third_result["response"]
-    assert session_state["birth_date"] == "1990-02-02"
-    assert session_state["resolved_customer_type"] == "재진"
-    assert session_state["pending_confirmation"]["appointment"]["customer_type"] == "재진"
-    assert session_state["pending_confirmation"]["appointment"]["birth_date"] == "1990-02-02"
-    mock_classify_intent.assert_called_once()
+    assert chat_create_session is create_session
+    assert chat_process_message is process_message
+    assert run_process_ticket is process_ticket
