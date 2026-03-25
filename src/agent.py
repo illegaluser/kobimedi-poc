@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import Mock
 
 from .classifier import safety_check, classify_intent
+from . import calcom_client
 from .policy import apply_policy
 from .response_builder import (
     build_appointment_options_question,
@@ -1399,6 +1400,43 @@ def _handle_pending_confirmation(
         appointment = pending_confirmation.get("appointment", {})
         action = pending_confirmation.get("action", "book_appointment")
         if action == "book_appointment":
+            # ── Position 3: cal.com 예약 생성 (로컬 영속화 직전, Race Condition 방어) ──
+            dept = appointment.get("department")
+            if calcom_client.is_calcom_enabled(dept):
+                cc_result = calcom_client.create_booking(
+                    department=dept or "",
+                    date=appointment.get("date", ""),
+                    time=appointment.get("time", ""),
+                    patient_name=appointment.get("patient_name") or appointment.get("customer_name") or "",
+                    patient_contact=appointment.get("patient_contact") or "",
+                    customer_type=appointment.get("customer_type") or "new",
+                )
+                if cc_result is None:
+                    # 네트워크/타임아웃 Hard Fail
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        session_state,
+                        action="clarify",
+                        message="현재 외부 예약 시스템 응답 지연으로 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                        department=dept,
+                        ticket=ticket,
+                        classified_intent="book_appointment",
+                        intent_result={"action": "book_appointment", "department": dept},
+                        customer_type=customer_type,
+                    )
+                elif cc_result is False:
+                    # 409 Conflict — Race Condition
+                    record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
+                    return _build_response_and_record(
+                        session_state,
+                        action="clarify",
+                        message="방금 전 외부 캘린더에서 예약이 마감되었습니다. 다른 시간을 선택해주세요.",
+                        department=dept,
+                        ticket=ticket,
+                        classified_intent="book_appointment",
+                        intent_result={"action": "book_appointment", "department": dept},
+                        customer_type=customer_type,
+                    )
             try:
                 persisted_booking = create_booking(appointment)
             except Exception:
@@ -1724,10 +1762,31 @@ def process_ticket(
         _set_pending_missing_info(state, dialogue_missing_info)
         _increment_clarify_turn_count(state)
         record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
+
+        # ── Position 1: cal.com 선제적 슬롯 안내 (동선 1.3) ──
+        # 분과+날짜는 있지만 시간만 누락된 경우, cal.com에서 가용 시간을 조회하여 안내
+        clarify_message = build_missing_info_question(dialogue_missing_info, department=department, action_context=action)
+        if (
+            "time" in dialogue_missing_info
+            and action == "book_appointment"
+            and merged_slots.get("department")
+            and merged_slots.get("date")
+            and calcom_client.is_calcom_enabled(merged_slots["department"])
+        ):
+            try:
+                proactive_slots = calcom_client.get_available_slots(
+                    merged_slots["department"], merged_slots["date"]
+                )
+                if proactive_slots is not None and proactive_slots:
+                    slots_str = ", ".join(proactive_slots)
+                    clarify_message = f"예약 가능한 시간은 {slots_str}입니다. 언제가 좋으신가요?"
+            except Exception:
+                pass  # 조회 실패 시 기본 clarify 메시지 유지
+
         return _build_response_and_record(
             state,
             action="clarify",
-            message=build_missing_info_question(dialogue_missing_info, department=department, action_context=action),
+            message=clarify_message,
             department=department,
             ticket=ticket,
             classified_intent=classified_intent,
@@ -1880,6 +1939,46 @@ def process_ticket(
             "customer_type": customer_type,
         }
         if is_chat:
+            # ── Position 2: 확정 질문 직전 cal.com 가용성 교차 검증 (동선 1 & 2) ──
+            chosen_time = merged_slots.get("time")
+            if department and chosen_time and calcom_client.is_calcom_enabled(department):
+                pre_slots = calcom_client.get_available_slots(department, merged_slots.get("date", ""))
+                if pre_slots is None:
+                    # 네트워크/타임아웃 Hard Fail
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        state,
+                        action="clarify",
+                        message="현재 외부 예약 시스템 응답 지연으로 가용 시간을 확인할 수 없습니다. 잠시 후 다시 시도해주세요.",
+                        department=department,
+                        ticket=ticket,
+                        classified_intent=classified_intent,
+                        safety_result=safety_result,
+                        intent_result=intent_result,
+                        policy_result={"allowed": False},
+                        customer_type=customer_type,
+                    )
+                elif chosen_time not in pre_slots:
+                    # 슬롯 마감 — 대안 제시 후 clarify
+                    alt_text = (
+                        f"가능한 다른 시간은 {', '.join(pre_slots)}입니다."
+                        if pre_slots
+                        else "현재 예약 가능한 시간이 없습니다."
+                    )
+                    record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
+                    return _build_response_and_record(
+                        state,
+                        action="clarify",
+                        message=f"선택하신 시간은 방금 마감되었습니다. {alt_text}",
+                        department=department,
+                        ticket=ticket,
+                        classified_intent=classified_intent,
+                        safety_result=safety_result,
+                        intent_result=intent_result,
+                        policy_result={"allowed": False},
+                        customer_type=customer_type,
+                    )
+
             # 채팅 모드: 확인 질문 후 사용자 응답 대기
             if state is not None:
                 state["pending_confirmation"] = {"action": "book_appointment", "appointment": appointment}
@@ -1899,7 +1998,84 @@ def process_ticket(
                 customer_type=customer_type,
             )
         else:
-            # 배치 모드: 확인 없이 즉시 예약 결정
+            # ── 배치 모드: cal.com 가용성 확인 후 즉시 예약 확정 (동선 5.1, 5.2) ──
+            if calcom_client.is_calcom_enabled(department):
+                chosen_time = merged_slots.get("time")
+                batch_slots = calcom_client.get_available_slots(department, merged_slots.get("date", ""))
+                if batch_slots is None:
+                    # 네트워크/타임아웃 Hard Fail
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        state,
+                        action="clarify",
+                        message="현재 외부 예약 시스템 응답 지연으로 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                        department=department,
+                        ticket=ticket,
+                        classified_intent="book_appointment",
+                        safety_result=safety_result,
+                        intent_result=intent_result,
+                        policy_result={"allowed": False},
+                        customer_type=customer_type,
+                    )
+                if chosen_time and chosen_time not in batch_slots:
+                    # 슬롯 마감 — 즉시 Drop (Soft Fail, 대안 포함)
+                    alt_text = (
+                        f"대안 시간: {', '.join(batch_slots)}"
+                        if batch_slots
+                        else "현재 예약 가능한 시간이 없습니다."
+                    )
+                    record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
+                    return _build_response_and_record(
+                        state,
+                        action="clarify",
+                        message=f"요청하신 시간이 마감되었습니다. {alt_text}",
+                        department=department,
+                        ticket=ticket,
+                        classified_intent="book_appointment",
+                        safety_result=safety_result,
+                        intent_result=intent_result,
+                        policy_result={"allowed": False},
+                        customer_type=customer_type,
+                    )
+                # 슬롯 가용 — cal.com 예약 생성
+                cc_result = calcom_client.create_booking(
+                    department=department or "",
+                    date=merged_slots.get("date", ""),
+                    time=chosen_time or "",
+                    patient_name=appointment.get("patient_name") or appointment.get("customer_name") or "",
+                    patient_contact=appointment.get("patient_contact") or "",
+                    customer_type=appointment.get("customer_type") or "new",
+                )
+                if cc_result is None:
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        state,
+                        action="clarify",
+                        message="현재 외부 예약 시스템 응답 지연으로 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                        department=department,
+                        ticket=ticket,
+                        classified_intent="book_appointment",
+                        safety_result=safety_result,
+                        intent_result=intent_result,
+                        policy_result={"allowed": False},
+                        customer_type=customer_type,
+                    )
+                elif cc_result is False:
+                    record_kpi_event(KpiEvent.AGENT_SOFT_FAIL_CLARIFY)
+                    return _build_response_and_record(
+                        state,
+                        action="clarify",
+                        message="방금 전 외부 캘린더에서 예약이 마감되었습니다. 다른 시간을 선택해주세요.",
+                        department=department,
+                        ticket=ticket,
+                        classified_intent="book_appointment",
+                        safety_result=safety_result,
+                        intent_result=intent_result,
+                        policy_result={"allowed": False},
+                        customer_type=customer_type,
+                    )
+
+            # 배치 모드: 확인 없이 즉시 예약 결정 (cal.com 비활성 또는 성공)
             message = build_confirmation_question(appointment, now)
             record_kpi_event(KpiEvent.AGENT_SUCCESS)
             return _build_response_and_record(

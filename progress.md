@@ -351,3 +351,35 @@ D-051 포함 전 51개 케이스 완벽 통과.
 ```
 
 회귀 없음. 기존 124개 테스트 전부 유지.
+
+---
+
+## Current Status (2026-03-26 Phase 7 — Q4 cal.com 외부 API 연동)
+
+### 구현 내용
+
+| # | 항목 | 내용 |
+|---|------|------|
+| 1 | `src/calcom_client.py` 신규 구현 | Cal.com API v2 단일 진입점. `is_calcom_enabled()`, `get_available_slots()`, `create_booking()` 구현. CALCOM_API_KEY/분과별 Event ID 환경변수 lazy-read, KST→UTC 변환, 전화번호 기반 더미 이메일 생성, 타임아웃 10초 명시, 전 예외 `requests.RequestException` 캐치 후 None/False 반환 |
+| 2 | `src/agent.py` 파이프라인 통합 (3 위치) | **Position 1**: 분과+날짜 있고 시간만 누락 시 cal.com `get_available_slots` 호출, 가용 시간 선제적 안내 (동선 1.3). **Position 2**: 확정 질문 직전 슬롯 교차 검증 — 마감 시 대안 제시 후 clarify (동선 1 & 2). **Position 3**: `_handle_pending_confirmation`에서 사용자 \"네\" 응답 후 로컬 저장 직전 `create_booking` 호출 — 409 Conflict는 False 반환, 네트워크 오류는 None 반환, 각각 clarify 폴백 + `AGENT_HARD_FAIL` 기록 (동선 2.2, 3.2) |
+| 3 | 배치 모드 통합 | cal.com 활성 시 슬롯 조회 → 마감이면 즉시 clarify+대안 Drop (동선 5.1), 가용이면 `create_booking` 호출 후 `book_appointment` 확정 (동선 5.2) |
+| 4 | Graceful Degradation | `is_calcom_enabled() == False`(API Key 없음 또는 분과 미매핑) 시 외부 연동 구간 조용히 건너뜀, 기존 로컬 파이프라인 정상 동작 유지 (동선 4.1, 4.2) |
+| 5 | `tests/test_calcom.py` 신규 작성 | 39개 테스트, `unittest.mock.patch`로 실제 네트워크 통신 완전 차단. `is_calcom_enabled`, 더미 이메일, KST↔UTC 변환, slots API 성공/빈슬롯/타임아웃/500/헤더 검증, bookings API 성공/409/타임아웃/500/페이로드 구조 검증, agent.py 통합 Race Condition/Hard Fail/Graceful Degradation 경로, 배치 모드 Drop/즉시확정 검증 |
+
+### 테스트 결과
+
+| 테스트 | 결과 |
+|--------|------|
+| `tests/test_calcom.py` | **39 / 39 passed** |
+| 전체 단위 테스트 (test_classifier.py 제외) | **143 / 143 passed** |
+| 회귀 없음 | ✅ |
+
+### features.json 업데이트
+- F-071 `passes: true` (calcom_client.py 단일 진입점)
+- F-072 `passes: true` (available slots 조회 후 응답 반영)
+- F-073 `passes: true` (booking 생성 조건 준수)
+- F-074 `passes: true` (cal.com 실패 시 거짓 성공 금지)
+
+### Next Step
+- cal.com 대시보드에서 실제 예약 생성 스크린샷 캡처 (산출물 제출용)
+- E2E 통합 테스트 (실 Ollama LLM + 실 cal.com 연동)

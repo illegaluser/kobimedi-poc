@@ -1,6 +1,6 @@
 {
   "version": "2.1",
-  "last_updated": "2026-03-25",
+  "last_updated": "2026-03-26",
   "description": "코비메디 예약 Agent PoC — 기능 정의 및 구현 체크리스트",
   "groups": {
     "safety": "안전 게이트 및 하드 제약 (최우선)",
@@ -633,7 +633,9 @@
       "description": "cal.com API 호출은 src/calcom_client.py를 통해서만 수행. agent.py 직접 호출 금지.",
       "policy_ref": "AGENTS.md rule 10, policy_digest §11",
       "priority": 3,
-      "status": "required"
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_calcom.py"
     },
     {
       "id": "F-072",
@@ -642,7 +644,9 @@
       "description": "예약 가능 시간은 cal.com available slots API 확인 후에만 고객에게 안내.",
       "policy_ref": "policy_digest §11.2",
       "priority": 3,
-      "status": "required"
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_calcom.py"
     },
     {
       "id": "F-073",
@@ -652,6 +656,7 @@
       "policy_ref": "policy_digest §11.1, §11.2",
       "priority": 3,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_calcom.py"
     },
     {
@@ -662,6 +667,7 @@
       "policy_ref": "policy_digest §11.2",
       "priority": 2,
       "status": "required",
+      "passes": true,
       "test_ref": "tests/test_calcom.py"
     },
     {
