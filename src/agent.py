@@ -954,6 +954,9 @@ def _determine_dialogue_missing_info(
     birth_date: str | None,
     history_resolution: dict | None,
 ) -> list[str]:
+    if action in BOOKING_RELATED_ACTIONS and is_chat and is_proxy_booking is None:
+        return ["is_proxy_booking"]
+
     missing: list[str] = []
 
     if action not in BOOKING_RELATED_ACTIONS:

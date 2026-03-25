@@ -36,13 +36,16 @@
 ```
 1. safety gate
    ↓ (pass)
-2. classification (LLM → 7개 enum 중 1개)
+2. extraction (LLM → date/time/dept/patient signals/proxy signals)
+   - 이름, 연락처, 날짜 등 여러 정보를 한 문장에서 동시 추출 시도
    ↓
-3. extraction (LLM → date/time/dept/patient signals)
+3. typo correction / normalization (신규)
+   - "8ㅛㅣ" → "08:00" 등 명백한 오타 교정
+   - 교정 제안이 필요한 경우, 사용자에게 되묻고 확인 (clarify의 특수 케이스)
    ↓
 4. dialogue state merge
-   - is_proxy_booking 확인 (미확인 시 clarify)
-   - patient_name / patient_contact 수집 (미확보 시 clarify)
+   - is_proxy_booking 확인 (미확인 시 최우선 clarify)
+   - patient_name / patient_contact 수집 (미확보 시 다음 순위 clarify)
    ↓
 5. storage lookup
    - 기존 예약 조회 (modify/cancel/check)
@@ -116,6 +119,7 @@ ticket 입력
 - [ ] `is_proxy_booking`이 None이고 예약 의도가 확정된 시점에 본인/대리인 clarify 질문 생성
 
 #### Phase 0c. extraction 확장 (LLM prompt 또는 rule-based)
+- [ ] **(개선)** LLM 프롬프트 수정: 이름, 연락처, 날짜, 시간 등 여러 정보를 한 문장에서 동시에 추출하여 단일 JSON 객체로 반환하도록 명시적으로 요구 (`F-049`).
 - [ ] 전화번호 패턴(010-xxxx-xxxx, 01x-xxx-xxxx 등) 추출 로직 추가
 - [ ] 대리 예약 감지 패턴("엄마", "아버지", "가족", "대신", "대리" 등) 추가
 - [ ] 추출된 전화번호를 `patient_contact` 슬롯에 저장
@@ -124,11 +128,14 @@ ticket 입력
 
 ### Phase 1. Dialogue State Machine 리팩터
 
-**목표**: `clarify`를 4단계 누적 상태머신으로 안정화
+**목표**: `clarify`를 4단계 누적 상태머신으로 안정화하고, 불필요한 escalation 방지
 
 - [ ] `pending_missing_info_queue` 도입: 누락 정보를 우선순위 큐로 관리
-  - 우선순위: ① is_proxy_booking 확인 → ② patient_contact → ③ dept/date/time → ④ birth_date (충돌 시)
-- [ ] `clarify_turn_count` 도입 및 4단계 상한 적용
+  - 우선순위: ① is_proxy_booking 확인 → ② patient_contact → ③ patient_name → ④ dept/date/time → ⑤ birth_date (충돌 시)
+- [ ] **(개선)** `clarify_turn_count` 상한 정책 완화 (`F-042`):
+  - 오타 수정 제안과 같이 복구 가능한 `clarify`는 `clarify_turn_count`를 증가시키지 않거나, 가중치를 낮춰 성급한 escalation 방지.
+- [ ] **(신규)** 오타 교정 제안 및 확인 로직 추가 (`F-040`):
+  - 시간 등 특정 정보 추출 실패 시, 오타 가능성이 높은 경우(예: "8ㅛㅣ") 교정된 값을 제안하고 사용자에게 "예/아니오" 확인을 받는 미니 상태 도입.
 - [ ] 이미 확보된 슬롯은 재질문하지 않도록 누적 슬롯 검사 강화
 - [ ] 매 턴마다 전체 상태 재평가 (action 재분류 포함)
 - [ ] 대체 슬롯 선택 상태 전환 (slots unavailable → candidate list → pending_slot_selection)
