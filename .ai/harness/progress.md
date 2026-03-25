@@ -1,5 +1,23 @@
 # Progress
 
+## Phase 5 — Deterministic policy engine completed (2026-03-25)
+- `src/policy.py` 구현 완료
+  - LLM 호출 없이 순수 Python 결정론 로직으로 정책 판정을 수행하도록 정리 (F-051)
+  - 모든 핵심 시간 계산 경로가 `now` 파라미터를 기준으로 동작하도록 구현 (F-040)
+  - 평일/토요일 운영시간, 일요일 휴진, 점심시간 차단, 공휴일 불확실 시 `clarify` 처리 반영 (F-052)
+  - 1시간 타임 윈도우 최대 3명 정원 제한과 초진 40분 / 재진 30분 겹침 계산 반영 (F-053, F-054)
+  - 변경/취소 24시간 경계값을 정확히 처리하고, 일반 당일 신규 예약은 별도 허용 로직으로 분리 (F-055, F-057)
+  - 예약 거절 시 1~3개의 대체 슬롯을 계산해 제시하도록 구현 (F-056)
+
+- `tests/test_policy.py` 재작성 완료
+  - freezegun 기반으로 운영시간, 점심시간, 일요일, 공휴일 불확실, 24시간 경계값 검증 추가
+  - 정원 제한, 초진/재진 슬롯 길이, 당일 신규 예약 허용, 응급 당일 예약 escalation, 저장소 진실원천 조회 검증 추가
+
+- 검증 완료
+  - `python3 -m pytest tests/test_policy.py` → **14 passed**
+  - `python3 -m pytest tests/test_policy.py tests/test_dialogue.py tests/test_storage.py` → **33 passed**
+  - `.ai/harness/features.json`에서 `F-040`, `F-051 ~ F-057` `passes: true` 반영 완료
+
 ## Phase 1 — Storage truth-source hardening completed (2026-03-25)
 - `src/storage.py` 보강 완료
   - `create_booking()`에 최종 저장 직전 fresh recheck 훅(`availability_rechecker`)을 추가하여, 확정 직전 최신 저장소 상태 기준 재검증이 가능하도록 확장 (F-064)
@@ -100,22 +118,21 @@
 
 ## Current Status
 
-- Phase 4 — Dialogue state / patient identity 구현 완료
-  - `src/agent.py`에 본인/대리인 우선 확인(`is_proxy_booking`), 환자 본인 정보 수집(`patient_name`, `patient_contact`), `pending_missing_info_queue`, `clarify_turn_count`, 대체 슬롯 선택 상태, 최종 확인 후 영속화 흐름을 반영
-  - chat 모드에서는 예약성 액션(book/modify/cancel/check) 시작 시 상태머신을 통해 본인/대리인 확인을 최우선 수행하고, batch 모드에서는 공통 agent core를 유지하면서 단일 턴 폴백을 적용
-  - `tests/test_dialogue.py`를 F-031~F-033, F-041~F-048 기준으로 재작성하여 본인/대리인 확인, 멀티턴 누적, 4턴 상한, 대체 슬롯 선택, 최종 확인 후 저장, chat/run 공통 코어 계약을 검증
-  - 검증 완료: `python3 -m pytest tests/test_dialogue.py tests/test_safety.py tests/test_storage.py` → **54 passed**, `python3 -m pytest tests/test_classifier.py tests/test_batch.py` → **19 passed**
-  - `.ai/harness/features.json`에서 `F-031~F-033`, `F-041~F-048` `passes: true` 반영 완료
+- Phase 5 — Policy 엔진 구현 완료
+  - `src/policy.py`에 결정론 기반 운영시간/점심시간/휴진일/공휴일 불확실 처리, 1시간 정원, 초진·재진 슬롯 겹침, 24시간 변경·취소 경계값, 당일 일반 신규 예약 허용, 응급 escalation, 대체 슬롯 제안을 반영
+  - `tests/test_policy.py`에서 freezegun 기반 경계값 회귀 테스트를 추가했고 `tests/test_dialogue.py`, `tests/test_storage.py`와의 교차 검증까지 통과
+  - `.ai/harness/features.json`에서 `F-040`, `F-051 ~ F-057` 상태를 `passes: true`로 반영 완료
 
-- Safety gate / classifier / LLM 예외 방어 구현 완료
-  - `src/classifier.py`에서 7개 action enum 강제, 불확실 시 `clarify` 폴백, 날짜/시간/분과/의사/환자정보/대리예약/응급 신호/기존 예약 힌트 추출까지 반영
-  - `src/llm_client.py`에서 Ollama `qwen3-coder:30b` 호출 시 `format='json'`을 강제하고, connection refused / timeout / JSON 파싱 오류 / 잘못된 응답 구조에 대해 거짓 성공 없이 `clarify` 중심 안전 폴백 적용
-  - `tests/test_classifier.py`, `tests/test_safety.py` 회귀 검증을 통과했고 harness에는 `F-011 ~ F-014`, `F-021 ~ F-030`, `F-083 ~ F-084` 상태를 반영 완료
+- Phase 4 — Dialogue state / patient identity 구현 유지
+  - 본인/대리인 확인, 환자 본인 정보 수집, 멀티턴 누적, 대체 슬롯 선택, 최종 확인 후 영속화 흐름이 공통 agent core에 반영된 상태
+
+- Safety / classifier / storage 기반 안정 상태 유지
+  - safety gate, 분류/추출, 전화번호 우선 식별, 저장소 진실원천 규칙까지 기존 회귀 테스트 통과 상태 유지
 
 - Next step
-  - 운영시간/점심시간/휴진일 경계값을 포함한 policy Phase 2 요구사항 보강
-  - confirmation 직전 storage fresh recheck를 대화형 예약 확정 흐름과 더 정밀하게 연결
-  - 남은 metrics/docs 산출물과 선택 과제(cal.com) 정합성 검증
+  - metrics/events 계측 요구사항(F-091~F-094) 구현 및 검증
+  - 남은 docs 산출물(`docs/q1_metric_rubric.md`, `docs/q3_safety.md`, `docs/final_report.md`) 최신화
+  - 선택 과제(cal.com)와 현재 정책/저장소 계약의 정합성 최종 점검
 
 ### Documentation update completed (2026-03-25)
 - `docs/policy_digest.md` 업데이트 완료

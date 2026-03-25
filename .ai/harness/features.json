@@ -365,6 +365,17 @@
       "passes": true
     },
     {
+      "id": "F-040",
+      "group": "policy",
+      "title": "모든 시간 계산은 now 파라미터 기반 결정론 처리",
+      "description": "정책 엔진의 시간 비교·운영시간·24시간 경계값·대체 슬롯 계산 함수는 시스템 현재시각에 직접 의존하지 않고 now 파라미터를 받아 결정론적으로 동작한다.",
+      "policy_ref": "docs/architecture.md §14.1, request task F-040",
+      "priority": 1,
+      "status": "required",
+      "passes": true,
+      "test_ref": "tests/test_policy.py"
+    },
+    {
       "id": "F-041",
       "group": "dialogue",
       "title": "pending_missing_info_queue 상태 추적",
@@ -455,7 +466,8 @@
       "policy_ref": "AGENTS.md rule 4, policy_digest §0.1",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_policy.py"
+      "test_ref": "tests/test_policy.py",
+      "passes": true
     },
     {
       "id": "F-052",
@@ -465,7 +477,8 @@
       "policy_ref": "policy_digest §3",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_policy.py"
+      "test_ref": "tests/test_policy.py",
+      "passes": true
     },
     {
       "id": "F-053",
@@ -475,7 +488,8 @@
       "policy_ref": "policy_digest §8.2",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_policy.py"
+      "test_ref": "tests/test_policy.py",
+      "passes": true
     },
     {
       "id": "F-054",
@@ -485,7 +499,8 @@
       "policy_ref": "policy_digest §8.3",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_policy.py"
+      "test_ref": "tests/test_policy.py",
+      "passes": true
     },
     {
       "id": "F-055",
@@ -495,7 +510,8 @@
       "policy_ref": "policy_digest §9.1, §8.4, §13",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_policy.py"
+      "test_ref": "tests/test_policy.py",
+      "passes": true
     },
     {
       "id": "F-056",
@@ -504,7 +520,9 @@
       "description": "예약 불가 시 같은 날 다른 시간 또는 다음 가용일 후보 1-3개 제시. 단순 거절 금지.",
       "policy_ref": "policy_digest §8.6",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "test_ref": "tests/test_policy.py",
+      "passes": true
     },
     {
       "id": "F-057",
@@ -513,7 +531,9 @@
       "description": "급성/응급이 아닌 당일 신규 예약은 정상 정책(운영시간/정원)으로 처리 가능.",
       "policy_ref": "policy_digest §8.4",
       "priority": 1,
-      "status": "required"
+      "status": "required",
+      "test_ref": "tests/test_policy.py",
+      "passes": true
     },
     {
       "id": "F-061",
