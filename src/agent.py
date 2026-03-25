@@ -641,9 +641,8 @@ def _run_safety_gate(user_message: str, session_state: dict | None = None) -> di
             for f in ["patient_name", "patient_contact", "customer_name", "birth_date", "department", "date", "time"]
         ):
             full_check = _normalize_safety_result(classify_safety(user_message))
-            if full_check.get("category") == "safe":
-                return {"category": "safe"}
-            # 안전 위반이면 fast-path 무시하고 full_check 결과 반환
+            # 안전 통과 여부와 무관하게 full_check 결과를 그대로 반환하여
+            # unsupported_department / unsupported_doctor 등 부가 필드가 유지되도록 한다.
             return full_check
 
     return _normalize_safety_result(classify_safety(user_message))
