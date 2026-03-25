@@ -753,7 +753,8 @@
       "description": "Q1 KPI 2-3개 + Regression 지표 1-2개, 선정 근거, 측정 방법 포함 1페이지.",
       "policy_ref": "request.md Q1",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-102",
@@ -762,7 +763,8 @@
       "description": "Q3 안전성 대응: 실패율 0% 의미, 가드레일, 잔존 리스크, 고객 커뮤니케이션 1-2페이지.",
       "policy_ref": "request.md Q3",
       "priority": 2,
-      "status": "required"
+      "status": "required",
+      "passes": true
     },
     {
       "id": "F-103",
@@ -771,7 +773,8 @@
       "description": "아키텍처 설명 + 주요 설계 결정 근거 + 데모 증빙(스크린샷/영상) 포함.",
       "policy_ref": "request.md Deliverables",
       "priority": 3,
-      "status": "required"
+      "status": "required",
+      "passes": true
     }
   ]
 }
