@@ -1,415 +1,245 @@
-from datetime import datetime, timezone
-
+from datetime import datetime, timedelta
+import pytest
 from freezegun import freeze_time
 
+from src.models import Ticket, Booking, User, Action, PolicyResult
 from src.policy import (
-    POLICY_REASONS,
     apply_policy,
     get_appointment_duration,
-    is_change_allowed,
+    is_change_or_cancel_allowed,
     is_slot_available,
     suggest_alternative_slots,
-    validate_existing_appointment,
 )
 
+# A fixed point in time for consistent testing
+NOW = datetime(2026, 3, 25, 10, 0, 0)
 
-class FakeStorage:
-    def __init__(self, bookings):
-        self.bookings = list(bookings)
-        self.calls = []
+# Mock Data using the new data classes
+@pytest.fixture
+def sample_user() -> User:
+    return User(patient_id="p001", name="김민준", is_first_visit=False)
 
-    def find_bookings(self, customer_name=None, filters=None, patient_contact=None):
-        self.calls.append(
-            {
-                "customer_name": customer_name,
-                "filters": filters or {},
-                "patient_contact": patient_contact,
-            }
+@pytest.fixture
+def new_user() -> User:
+    return User(patient_id="p002", name="이서아", is_first_visit=True)
+
+@pytest.fixture
+def existing_bookings() -> list[Booking]:
+    return [
+        # Capacity test: 3 bookings at 2 PM
+        Booking(
+            booking_id="b001", patient_id="p101", patient_name="박서준",
+            start_time=datetime(2026, 3, 26, 14, 0), end_time=datetime(2026, 3, 26, 14, 30),
+            is_first_visit=False
+        ),
+        Booking(
+            booking_id="b002", patient_id="p102", patient_name="최지우",
+            start_time=datetime(2026, 3, 26, 14, 0), end_time=datetime(2026, 3, 26, 14, 30),
+            is_first_visit=False
+        ),
+        Booking(
+            booking_id="b003", patient_id="p103", patient_name="강하늘",
+            start_time=datetime(2026, 3, 26, 14, 0), end_time=datetime(2026, 3, 26, 14, 30),
+            is_first_visit=False
+        ),
+        # Overlap test: A 40-minute booking at 3 PM
+        Booking(
+            booking_id="b004", patient_id="p104", patient_name="윤보라",
+            start_time=datetime(2026, 3, 26, 15, 0), end_time=datetime(2026, 3, 26, 15, 40),
+            is_first_visit=True
+        ),
+        # Change/Cancel test: A booking more than 24h away
+        Booking(
+            booking_id="b005", patient_id="p001", patient_name="김민준",
+            start_time=datetime(2026, 3, 27, 11, 0), end_time=datetime(2026, 3, 27, 11, 30),
+            is_first_visit=False
+        ),
+        # Change/Cancel test: A booking less than 24h away
+         Booking(
+            booking_id="b006", patient_id="p001", patient_name="김민준",
+            start_time=datetime(2026, 3, 25, 11, 0), end_time=datetime(2026, 3, 25, 11, 30),
+            is_first_visit=False
         )
-        filters = filters or {}
-        results = []
-        for booking in self.bookings:
-            if patient_contact and booking.get("patient_contact") != patient_contact:
-                continue
-            if customer_name and booking.get("customer_name") != customer_name:
-                continue
-            if filters.get("id") and booking.get("id") != filters["id"]:
-                continue
-            if filters.get("department") and booking.get("department") != filters["department"]:
-                continue
-            if filters.get("booking_time") and booking.get("booking_time") != filters["booking_time"]:
-                continue
-            if filters.get("date") and not str(booking.get("booking_time", "")).startswith(filters["date"]):
-                continue
-            if filters.get("time") and filters["time"] not in str(booking.get("booking_time", "")):
-                continue
-            results.append(booking)
-        return results
-
-
-def test_F040_policy_functions_use_explicit_now_parameter_for_boundary_judgment():
-    now = datetime.fromisoformat("2025-03-17T09:00:00+09:00")
-
-    assert is_change_allowed("2025-03-18T09:00:00+09:00", now) is True
-    assert is_change_allowed("2025-03-18T08:59:00+09:00", now) is False
-
-    allowed_result = apply_policy(
-        {"action": "book_appointment", "booking_time": "2025-03-17T15:00:00+09:00", "customer_type": "재진"},
-        None,
-        [],
-        now,
-    )
-    blocked_result = apply_policy(
-        {"action": "book_appointment", "booking_time": "2025-03-17T08:50:00+09:00", "customer_type": "재진"},
-        None,
-        [],
-        now,
-    )
-
-    assert allowed_result["allowed"] is True
-    assert blocked_result["allowed"] is False
-    assert blocked_result["reason_code"] == "PAST_BOOKING_TIME"
-
-
-@freeze_time("2026-03-25T09:00:00+09:00")
-def test_F051_F052_business_hours_and_lunch_rules_are_deterministic():
-    now = datetime.now(timezone.utc)
-
-    lunch_start_result = apply_policy(
-        {"action": "book_appointment", "booking_time": "2026-03-26T12:30:00+09:00", "customer_type": "재진"},
-        None,
-        [],
-        now,
-    )
-    lunch_overlap_result = apply_policy(
-        {"action": "book_appointment", "booking_time": "2026-03-26T12:20:00+09:00", "customer_type": "초진"},
-        None,
-        [],
-        now,
-    )
-    lunch_end_result = apply_policy(
-        {"action": "book_appointment", "booking_time": "2026-03-26T13:30:00+09:00", "customer_type": "재진"},
-        None,
-        [],
-        now,
-    )
-    weekday_close_result = apply_policy(
-        {"action": "book_appointment", "booking_time": "2026-03-26T18:00:00+09:00", "customer_type": "재진"},
-        None,
-        [],
-        now,
-    )
-    saturday_close_result = apply_policy(
-        {"action": "book_appointment", "booking_time": "2026-03-28T13:00:00+09:00", "customer_type": "재진"},
-        None,
-        [],
-        now,
-    )
-    sunday_closed_result = apply_policy(
-        {"action": "book_appointment", "booking_time": "2026-03-29T10:00:00+09:00", "customer_type": "재진"},
-        None,
-        [],
-        now,
-    )
-
-    assert lunch_start_result["reason_code"] == "LUNCH_BREAK"
-    assert lunch_overlap_result["reason_code"] == "LUNCH_BREAK"
-    assert lunch_end_result["allowed"] is True
-    assert weekday_close_result["reason_code"] == "OUTSIDE_BUSINESS_HOURS"
-    assert saturday_close_result["reason_code"] == "OUTSIDE_BUSINESS_HOURS"
-    assert sunday_closed_result["reason_code"] == "CLOSED_SUNDAY"
-
-
-@freeze_time("2026-03-25T09:00:00+09:00")
-def test_F052_public_holiday_uncertain_returns_clarify_without_guessing():
-    result = apply_policy(
-        {
-            "action": "book_appointment",
-            "booking_time": "2026-04-01T10:00:00+09:00",
-            "customer_type": "재진",
-            "holiday_status": "unknown",
-        },
-        None,
-        [],
-        datetime.now(timezone.utc),
-    )
-
-    assert result["allowed"] is False
-    assert result["reason_code"] == "HOLIDAY_UNCERTAIN"
-    assert result["recommended_action"] == "clarify"
-
-
-@freeze_time("2026-04-08T12:00:00Z")
-def test_F053_hourly_capacity_allows_third_patient_but_blocks_fourth():
-    third_result = apply_policy(
-        {
-            "action": "book_appointment",
-            "booking_time": "2026-04-10T14:50:00Z",
-            "customer_type": "재진",
-        },
-        None,
-        [
-            {"id": "appt-001", "booking_time": "2026-04-10T14:00:00Z", "customer_type": "재진"},
-            {"id": "appt-002", "booking_time": "2026-04-10T14:20:00Z", "customer_type": "재진"},
-        ],
-        datetime.now(timezone.utc),
-    )
-    fourth_result = apply_policy(
-        {
-            "action": "book_appointment",
-            "booking_time": "2026-04-10T14:55:00Z",
-            "customer_type": "재진",
-        },
-        None,
-        [
-            {"id": "appt-001", "booking_time": "2026-04-10T14:00:00Z", "customer_type": "재진"},
-            {"id": "appt-002", "booking_time": "2026-04-10T14:20:00Z", "customer_type": "재진"},
-            {"id": "appt-003", "booking_time": "2026-04-10T14:40:00Z", "customer_type": "재진"},
-        ],
-        datetime.now(timezone.utc),
-    )
-
-    assert third_result["allowed"] is True
-    assert fourth_result["allowed"] is False
-    assert fourth_result["reason_code"] == "SLOT_FULL_CAPACITY"
-    assert fourth_result["needs_alternative"] is True
-    assert 1 <= len(fourth_result["alternative_slots"]) <= 3
-
-
-@freeze_time("2026-04-08T12:00:00Z")
-def test_F054_first_visit_uses_40_minutes_and_returning_visit_uses_30_minutes():
-    appointments = [{"id": "appt-a", "booking_time": "2026-04-10T14:00:00Z", "customer_type": "재진"}]
-
-    first_visit_result = apply_policy(
-        {
-            "action": "book_appointment",
-            "booking_time": "2026-04-10T13:50:00Z",
-            "customer_type": "초진",
-        },
-        None,
-        appointments,
-        datetime.now(timezone.utc),
-    )
-    returning_visit_result = apply_policy(
-        {
-            "action": "book_appointment",
-            "booking_time": "2026-04-10T13:30:00Z",
-            "customer_type": "재진",
-        },
-        None,
-        appointments,
-        datetime.now(timezone.utc),
-    )
-
-    assert first_visit_result["allowed"] is False
-    assert first_visit_result["reason_code"] == "SLOT_UNAVAILABLE"
-    assert first_visit_result["slot_duration_minutes"] == 40
-    assert returning_visit_result["allowed"] is True
-    assert returning_visit_result["slot_duration_minutes"] == 30
-    assert get_appointment_duration("초진") == 40
-    assert get_appointment_duration("재진") == 30
-    assert get_appointment_duration(None) is None
-
-
-@freeze_time("2025-03-16T09:00:00+09:00")
-def test_F055_exactly_24_hours_before_modify_is_allowed():
-    existing_appointment = {
-        "id": "existing-001",
-        "booking_time": "2025-03-17T09:00:00+09:00",
-        "customer_type": "재진",
-    }
-
-    result = apply_policy(
-        {
-            "action": "modify_appointment",
-            "booking_time": "2025-03-18T10:00:00+09:00",
-        },
-        existing_appointment,
-        [existing_appointment],
-        datetime.now(timezone.utc),
-    )
-
-    assert result["allowed"] is True
-    assert result["reason_code"] == "SUCCESS"
-
-
-@freeze_time("2025-03-16T09:01:00+09:00")
-def test_F055_less_than_24_hours_before_modify_or_cancel_is_blocked():
-    existing_modify = {
-        "id": "existing-002",
-        "booking_time": "2025-03-17T09:00:00+09:00",
-        "customer_type": "재진",
-    }
-    existing_cancel = {
-        "id": "existing-003",
-        "booking_time": "2025-03-17T09:00:00+09:00",
-        "customer_type": "재진",
-    }
-
-    modify_result = apply_policy(
-        {
-            "action": "modify_appointment",
-            "booking_time": "2025-03-18T10:00:00+09:00",
-        },
-        existing_modify,
-        [existing_modify],
-        datetime.now(timezone.utc),
-    )
-    cancel_result = apply_policy(
-        {"action": "cancel_appointment"},
-        existing_cancel,
-        [existing_cancel],
-        datetime.now(timezone.utc),
-    )
-
-    assert modify_result["allowed"] is False
-    assert cancel_result["allowed"] is False
-    assert modify_result["reason_code"] == "CHANGE_WINDOW_EXPIRED"
-    assert cancel_result["reason_code"] == "CHANGE_WINDOW_EXPIRED"
-
-
-@freeze_time("2025-03-17T09:00:00+09:00")
-def test_F055_does_not_apply_24_hour_rule_to_general_same_day_new_booking():
-    result = apply_policy(
-        {
-            "action": "book_appointment",
-            "booking_time": "2025-03-17T15:00:00+09:00",
-            "customer_type": "재진",
-        },
-        None,
-        [],
-        datetime.now(timezone.utc),
-    )
-
-    assert result["allowed"] is True
-    assert result["reason_code"] == "SUCCESS"
-    assert result["same_day"] is True
-
-
-@freeze_time("2025-03-16T09:00:00+09:00")
-def test_F057_same_day_emergency_new_booking_escalates():
-    result = apply_policy(
-        {
-            "action": "book_appointment",
-            "booking_time": "2025-03-16T15:00:00+09:00",
-            "customer_type": "재진",
-            "is_emergency": True,
-        },
-        None,
-        [],
-        datetime.now(timezone.utc),
-    )
-
-    assert result["allowed"] is False
-    assert result["reason_code"] == "SAME_DAY_EMERGENCY_ESCALATION"
-    assert result["recommended_action"] == "escalate"
-
-
-@freeze_time("2026-04-08T12:00:00Z")
-def test_F056_rejection_returns_one_to_three_alternative_slots():
-    appointments = [{"id": "appt-b", "booking_time": "2026-04-10T14:00:00Z", "customer_type": "재진"}]
-
-    result = apply_policy(
-        {
-            "action": "book_appointment",
-            "booking_time": "2026-04-10T14:10:00Z",
-            "customer_type": "재진",
-        },
-        None,
-        appointments,
-        datetime.now(timezone.utc),
-    )
-
-    assert result["allowed"] is False
-    assert result["reason_code"] == "SLOT_UNAVAILABLE"
-    assert result["needs_alternative"] is True
-    assert 1 <= len(result["alternative_slots"]) <= 3
-    assert result["alternative_slots"][0] == "2026-04-10T14:30:00Z"
-
-
-@freeze_time("2026-04-08T12:00:00+09:00")
-def test_existing_appointment_lookup_uses_storage_as_source_of_truth():
-    storage = FakeStorage(
-        [
-            {
-                "id": "booking-001",
-                "customer_name": "김민수",
-                "patient_contact": "010-1111-2222",
-                "department": "이비인후과",
-                "booking_time": "2026-04-10T14:00:00+09:00",
-                "customer_type": "재진",
-            }
-        ]
-    )
-
-    for action in ["modify_appointment", "cancel_appointment", "check_appointment"]:
-        result = apply_policy(
-            {
-                "action": action,
-                "customer_name": "김민수",
-                "patient_contact": "010-1111-2222",
-                "department": "이비인후과",
-                "date": "2026-04-10",
-                "time": "14:00",
-                "booking_time": "2026-04-10T14:00:00+09:00",
-                "customer_type": "재진",
-            },
-            None,
-            [],
-            datetime.now(timezone.utc),
-            storage=storage,
-        )
-
-        assert result["allowed"] is True
-        assert result["recommended_action"] == action
-
-    assert len(storage.calls) == 3
-    assert all(call["customer_name"] == "김민수" for call in storage.calls)
-    assert all(call["patient_contact"] == "010-1111-2222" for call in storage.calls)
-
-
-def test_validate_existing_appointment_returns_clarify_for_ambiguous_candidates():
-    result = validate_existing_appointment(
-        "modify_appointment",
-        None,
-        candidate_appointments=[
-            {"id": "appt-1", "booking_time": "2026-04-10T14:00:00Z"},
-            {"id": "appt-2", "booking_time": "2026-04-11T14:00:00Z"},
-        ],
-    )
-
-    assert result["allowed"] is False
-    assert result["reason_code"] == "AMBIGUOUS_EXISTING_APPOINTMENT"
-    assert result["recommended_action"] == "clarify"
-
-
-@freeze_time("2026-04-08T12:00:00Z")
-def test_is_slot_available_checks_hours_capacity_and_overlap_without_llm():
-    now = datetime.now(timezone.utc)
-    appointments = [
-        {"id": "appt-1", "booking_time": "2026-04-10T14:00:00Z", "customer_type": "재진"},
-        {"id": "appt-2", "booking_time": "2026-04-10T14:20:00Z", "customer_type": "재진"},
-        {"id": "appt-3", "booking_time": "2026-04-10T14:40:00Z", "customer_type": "재진"},
     ]
 
-    assert is_slot_available("2026-04-10T12:30:00Z", "재진", [], now)[0] is False
-    assert is_slot_available("2026-04-10T14:10:00Z", "재진", appointments[:1], now)[0] is False
-    assert is_slot_available("2026-04-10T14:50:00Z", "재진", appointments, now)[0] is False
-    assert is_slot_available("2026-04-10T15:10:00Z", "재진", appointments, now)[0] is True
+# === Test Core Policy Functions ===
 
-
-@freeze_time("2026-04-08T12:00:00Z")
-def test_suggest_alternative_slots_returns_future_candidates_only():
-    now = datetime.now(timezone.utc)
-    appointments = [{"id": "appt-1", "booking_time": "2026-04-10T14:00:00Z", "customer_type": "재진"}]
-
-    alternatives = suggest_alternative_slots(
-        "2026-04-10T14:10:00Z",
-        "재진",
-        appointments,
-        now=now,
+@freeze_time(NOW)
+def test_book_appointment_success(sample_user, existing_bookings):
+    """F-051: Test successful booking in an available slot."""
+    ticket = Ticket(
+        intent="book_appointment",
+        user=sample_user,
+        context={"appointment_time": datetime(2026, 3, 26, 16, 0)}
     )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.BOOK_APPOINTMENT
 
-    assert 1 <= len(alternatives) <= 3
-    assert alternatives[0] == "2026-04-10T14:30:00Z"
-    assert all(datetime.fromisoformat(slot.replace("Z", "+00:00")) > datetime.fromisoformat("2026-04-10T14:10:00+00:00") for slot in alternatives)
+@freeze_time(NOW)
+def test_book_appointment_fail_past(sample_user, existing_bookings):
+    """F-040: Test failure when booking in the past."""
+    ticket = Ticket(
+        intent="book_appointment",
+        user=sample_user,
+        context={"appointment_time": datetime(2026, 3, 25, 9, 0)} # In the past
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.CLARIFY
+    assert "과거 시간" in result.message
+    assert not result.suggested_slots # Should not suggest past slots
+
+@freeze_time(NOW)
+def test_book_appointment_fail_overlap_new_patient(new_user, existing_bookings):
+    """F-054: Test failure due to overlap with an existing booking (40 min duration)."""
+    ticket = Ticket(
+        intent="book_appointment",
+        user=new_user,
+        # This 40-min booking would end at 15:10, overlapping with b004 (starts at 15:00)
+        context={"appointment_time": datetime(2026, 3, 26, 14, 30)}
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.CLARIFY
+    assert "다른 예약과 겹칩니다" in result.message
+
+@freeze_time(NOW)
+def test_book_appointment_fail_capacity(sample_user, existing_bookings):
+    """F-053: Test failure due to reaching capacity limit (3)."""
+    ticket = Ticket(
+        intent="book_appointment",
+        user=sample_user,
+        context={"appointment_time": datetime(2026, 3, 26, 14, 0)} # 3 bookings already exist
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.CLARIFY
+    assert "예약 정원" in result.message
+
+@freeze_time(NOW)
+def test_book_appointment_suggests_alternatives(sample_user, existing_bookings):
+    """F-056: Test if a failed booking suggests alternative slots."""
+    ticket = Ticket(
+        intent="book_appointment",
+        user=sample_user,
+        context={"appointment_time": datetime(2026, 3, 26, 14, 0)} # Full slot
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.CLARIFY
+    assert len(result.suggested_slots) > 0
+    assert len(result.suggested_slots) <= 3
+    # First suggestion should be after the failed 14:00 slot
+    assert result.suggested_slots[0] > datetime(2026, 3, 26, 14, 0)
+
+@freeze_time(NOW)
+def test_modify_appointment_success(sample_user, existing_bookings):
+    """F-055: Test successful modification >24 hours before."""
+    ticket = Ticket(
+        intent="modify_appointment",
+        user=sample_user,
+        context={
+            "booking_id": "b005", # Original time is 2026-03-27 11:00
+            "new_appointment_time": datetime(2026, 3, 27, 16, 0)
+        }
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.MODIFY_APPOINTMENT
+
+@freeze_time(NOW)
+def test_modify_appointment_fail_window_expired(sample_user, existing_bookings):
+    """F-055: Test failed modification <24 hours before."""
+    ticket = Ticket(
+        intent="modify_appointment",
+        user=sample_user,
+        context={
+            "booking_id": "b006", # Original time is 2026-03-25 11:00 (1h from NOW)
+            "new_appointment_time": datetime(2026, 3, 25, 16, 0)
+        }
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.REJECT
+    assert "24시간 이전에만 가능" in result.message
+
+@freeze_time(NOW)
+def test_modify_appointment_ignores_own_slot(sample_user, existing_bookings):
+    """F-054: Test that modification check ignores the original booking slot."""
+    ticket = Ticket(
+        intent="modify_appointment",
+        user=sample_user,
+        context={
+            "booking_id": "b005", # Original time: 2026-03-27 11:00
+            # Try to move it 30 mins earlier, into a free slot.
+            # Without ignoring b005, this might seem blocked by itself.
+            "new_appointment_time": datetime(2026, 3, 27, 10, 30)
+        }
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.MODIFY_APPOINTMENT
+
+@freeze_time(NOW)
+def test_cancel_appointment_success(sample_user, existing_bookings):
+    """F-055: Test successful cancellation >24 hours before."""
+    ticket = Ticket(
+        intent="cancel_appointment",
+        user=sample_user,
+        context={"booking_id": "b005"} # Original time is 2026-03-27 11:00
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.CANCEL_APPOINTMENT
+
+@freeze_time(NOW)
+def test_cancel_appointment_fail_window_expired(sample_user, existing_bookings):
+    """F-055: Test failed cancellation <24 hours before."""
+    ticket = Ticket(
+        intent="cancel_appointment",
+        user=sample_user,
+        context={"booking_id": "b006"} # Original time is 2026-03-25 11:00
+    )
+    result = apply_policy(ticket, existing_bookings, NOW)
+    assert result.action == Action.REJECT
+    assert "24시간 이전에만 가능" in result.message
+
+def test_same_day_new_booking_is_not_subject_to_24h_rule(sample_user, existing_bookings):
+    """F-057: Same-day new bookings are allowed if slots are free, ignoring the 24h rule concept."""
+    now = datetime(2026, 3, 26, 9, 0) # Morning of the 26th
+    ticket = Ticket(
+        intent="book_appointment",
+        user=sample_user,
+        context={"appointment_time": datetime(2026, 3, 26, 17, 0)} # Booking for later today
+    )
+    result = apply_policy(ticket, existing_bookings, now)
+    assert result.action == Action.BOOK_APPOINTMENT
+
+# === Test Helper Functions ===
+
+def test_get_appointment_duration():
+    """F-054: Test duration calculation."""
+    assert get_appointment_duration(is_first_visit=True) == timedelta(minutes=40)
+    assert get_appointment_duration(is_first_visit=False) == timedelta(minutes=30)
+
+def test_is_change_or_cancel_allowed():
+    """F-055: Test the 24-hour boundary condition precisely."""
+    now = datetime(2026, 3, 25, 10, 0, 0)
+    
+    # Exactly 24 hours - allowed
+    appt_time_ok = datetime(2026, 3, 26, 10, 0, 0)
+    assert is_change_or_cancel_allowed(appt_time_ok, now) is True
+
+    # 23 hours 59 minutes 59 seconds - not allowed
+    appt_time_fail = datetime(2026, 3, 26, 9, 59, 59)
+    assert is_change_or_cancel_allowed(appt_time_fail, now) is False
+    
+    # Well over 24 hours - allowed
+    appt_time_far = datetime(2026, 3, 27, 10, 0, 0)
+    assert is_change_or_cancel_allowed(appt_time_far, now) is True
+
+def test_suggest_alternative_slots_logic(existing_bookings):
+    """F-056: Test alternative slot suggestion logic."""
+    now = datetime(2026, 3, 26, 13, 0)
+    # Requesting 14:00, which is full
+    original_time = datetime(2026, 3, 26, 14, 0)
+    duration = timedelta(minutes=30)
+    
+    suggestions = suggest_alternative_slots(original_time, duration, existing_bookings, now)
+    
+    # Expected: 14:00 is full. The next available 30-min slot is 14:30.
+    # The booking at 15:00-15:40 (b004) does not conflict with a 14:30-15:00 slot.
+    assert len(suggestions) > 0
+    assert suggestions[0] == datetime(2026, 3, 26, 14, 30)

@@ -3,17 +3,17 @@
   "last_updated": "2026-03-25",
   "description": "코비메디 예약 Agent PoC — 기능 정의 및 구현 체크리스트",
   "groups": {
-    "safety":           "안전 게이트 및 하드 제약 (최우선)",
-    "classification":   "의도 분류 및 액션 선택",
-    "extraction":       "정보 추출 (날짜/시간/분과/환자정보)",
+    "safety": "안전 게이트 및 하드 제약 (최우선)",
+    "classification": "의도 분류 및 액션 선택",
+    "extraction": "정보 추출 (날짜/시간/분과/환자정보)",
     "patient_identity": "환자 식별 및 초진/재진 판정",
-    "dialogue":         "멀티턴 대화 상태머신",
-    "policy":           "예약 정책 결정론 검사 (LLM 위임 금지)",
-    "storage":          "저장소 진실원천 관리",
-    "calcom":           "Q4 cal.com 연동 (선택)",
-    "output":           "출력 계약 및 형식",
-    "metrics":          "KPI/제약 지표 계측",
-    "docs":             "문서 산출물"
+    "dialogue": "멀티턴 대화 상태머신",
+    "policy": "예약 정책 결정론 검사 (LLM 위임 금지)",
+    "storage": "저장소 진실원천 관리",
+    "calcom": "Q4 cal.com 연동 (선택)",
+    "output": "출력 계약 및 형식",
+    "metrics": "KPI/제약 지표 계측",
+    "docs": "문서 산출물"
   },
   "features": [
     {
@@ -515,7 +515,8 @@
       "policy_ref": "policy_digest §8.6",
       "priority": 1,
       "status": "required",
-      "passes": true
+      "passes": true,
+      "test_ref": "tests/test_policy.py"
     },
     {
       "id": "F-057",
@@ -525,7 +526,8 @@
       "policy_ref": "policy_digest §8.4",
       "priority": 1,
       "status": "required",
-      "passes": true
+      "passes": true,
+      "test_ref": "tests/test_policy.py"
     },
     {
       "id": "F-061",

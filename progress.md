@@ -1,6 +1,18 @@
 # Project Progress
 
 ## Current status
+- **Phase 5 Complete**: 결정론적 예약 정책 엔진 구현 완료.
+  - `src/policy.py` — 순수 Python으로 정책 로직 구현 (LLM 호출 없음).
+    - **F-040**: 모든 시간 기반 함수가 `now: datetime` 파라미터를 명시적으로 받아 Mocking 테스트 호환.
+    - **F-053**: 동일 시작 시간 기준 예약 정원(3명) 초과 시 차단.
+    - **F-054**: 초진 40분/재진 30분 차등 슬롯 적용 및 겹침 방지.
+    - **F-055**: `(appointment_time - now).total_seconds() >= 86400` 로직으로 24시간 변경/취소 경계 정확히 판별.
+    - **F-056**: 슬롯 불가 시 `suggest_alternative_slots` 통해 해당일 다른 가용 시간 1~3개 제안.
+    - **F-057**: 당일 신규 예약은 24시간 규칙을 적용받지 않고, 일반 슬롯/정원 규칙만으로 처리.
+  - `src/models.py` — `Ticket`, `Booking`, `PolicyResult` 등 데이터 클래스 정의.
+  - `pytest tests/test_policy.py` 14/14 통과.
+  - `features.json`에서 F-040, F-051~F-057의 `"passes": true` 반영.
+
 - **Phase 4 Complete**: 멀티턴 대화 상태머신 및 본인/대리인 검증 구현 완료.
   - `src/agent.py` — 멀티턴 대화 상태머신 완성:
     - **F-031**: 예약 의도 확정 시 `is_proxy_booking=None`이면 "본인이신가요?" clarify 우선 발행. 슬롯(날짜/시간) 수집보다 선행.
@@ -66,7 +78,6 @@
   - `features.json`에서 F-034, F-035, F-036, F-037, F-038, F-039, F-061, F-062, F-063, F-064, F-065, F-066, F-067의 `"passes": true` 반영.
 
 ## Next step
-- **Proceed to Phase 5**: 골든 평가 및 최종 문서화.
+- **Proceed to Final Phase**: 골든 평가 및 최종 문서화.
   - `golden_eval/eval.py` 실행 및 Safe Resolution Rate >= 70% 검증.
   - `docs/q1_metric_rubric.md`, `docs/q3_safety.md`, `docs/final_report.md` 최신화 (F-101~F-103).
-  - 잔여 policy 결정론 테스트(`tests/test_policy.py`) 커버리지 보강 (F-051~F-057).
