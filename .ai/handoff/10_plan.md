@@ -132,8 +132,10 @@ ticket 입력
 
 - [ ] `pending_missing_info_queue` 도입: 누락 정보를 우선순위 큐로 관리
   - 우선순위: ① is_proxy_booking 확인 → ② patient_contact → ③ patient_name → ④ dept/date/time → ⑤ birth_date (충돌 시)
+  - **버그 수정**: LLM이 `is_proxy_booking`을 임의로 `False`로 추정하지 못하도록 방어하고, 확인 전에는 무조건 1순위 질문이 되도록 로직 고도화.
+  - **버그 수정**: `_extract_patient_name` 함수가 이름과 연락처가 함께 포함된 입력에서 전체 일치(`re.fullmatch`) 조건 때문에 이름을 추출하지 못하는 버그 해결.
 - [ ] **(개선)** `clarify_turn_count` 상한 정책 완화 (`F-042`):
-  - 오타 수정 제안과 같이 복구 가능한 `clarify`는 `clarify_turn_count`를 증가시키지 않거나, 가중치를 낮춰 성급한 escalation 방지.
+  - 사용자가 성공적으로 정보를 제공하여 누락된 항목이 하나라도 채워졌다면 `clarify_turn_count`를 초기화하도록 로직을 변경하여, 정상적인 다중 턴 정보 기입 과정 중의 불필요한 에스컬레이션 방지.
 - [ ] **(신규)** 오타 교정 제안 및 확인 로직 추가 (`F-040`):
   - 시간 등 특정 정보 추출 실패 시, 오타 가능성이 높은 경우(예: "8ㅛㅣ") 교정된 값을 제안하고 사용자에게 "예/아니오" 확인을 받는 미니 상태 도입.
 - [ ] 이미 확보된 슬롯은 재질문하지 않도록 누적 슬롯 검사 강화
