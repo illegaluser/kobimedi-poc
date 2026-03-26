@@ -248,15 +248,23 @@ source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-설치되는 패키지:
+`requirements.txt`에 명시된 의존성은 아래 5개입니다:
 
-| 패키지 | 용도 |
-|--------|------|
-| `ollama` | Ollama LLM 호출 클라이언트 |
-| `requests` | Cal.com API HTTP 통신 |
-| `python-dotenv` | `.env` 파일에서 환경변수 로드 |
-| `pytest` | 유닛 테스트 프레임워크 |
-| `freezegun` | 테스트 시 시간 고정 (예약 시간 테스트용) |
+```text
+ollama>=0.4.0
+pytest>=7.0.0
+freezegun>=1.2.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+```
+
+| 패키지 | 버전 | 용도 |
+|--------|------|------|
+| `ollama` | 0.4.0+ | Ollama LLM 호출 클라이언트. `classifier.py`가 이 패키지를 통해 로컬 LLM에 의도 분류를 요청합니다. |
+| `requests` | 2.31.0+ | Cal.com API HTTP 통신. `calcom_client.py`가 슬롯 조회/예약 생성 시 사용합니다. |
+| `python-dotenv` | 1.0.0+ | `.env` 파일의 환경변수(Cal.com API 키 등)를 자동으로 로드합니다. |
+| `pytest` | 7.0.0+ | 유닛 테스트 프레임워크. 226개 유닛 테스트를 실행합니다. |
+| `freezegun` | 1.2.0+ | 테스트 시 시스템 시간을 고정하여 24시간 룰, 운영시간 등 시간 의존 정책을 결정론적으로 검증합니다. |
 
 ### Step 3: Ollama 설치 + LLM 모델 다운로드
 
