@@ -553,6 +553,7 @@ kobimedi-poc/
     ├── policy_digest.md         # 예약 정책 요약
     ├── demo_evidence.md         # 데모 증빙
     ├── test_scenarios.md        # 시나리오 명세 (51개)
+    ├── prompts.md               # 구현 프롬프트 원문 (Phase 1~7)
     ├── test_results_unit.txt    # 유닛 테스트 결과
     └── test_results_scenario.txt # 시나리오 테스트 결과
 ```
@@ -670,36 +671,25 @@ Claude Code가 reviewer/tester 역할을 수행할 때 준수해야 할 10가지
 
 에이전트가 절대 위반해서는 안 되는 규칙(chat.py/run.py 로직 공유, 7개 action enum, safety gate 최선행, LLM 정책 위임 금지 등)을 정의합니다. 구현 단계에서 이 문서를 참조하여 아키텍처 일탈을 방지했습니다.
 
-### 구현 프롬프트
+### [구현 프롬프트 (Phase 1~7 원문)](docs/prompts.md)
 
 > 과제 요구사항: *"코딩 에이전트를 사용한 경우, 실행에 사용한 플랜/프롬프트/harness를 별첨으로 공유해주세요."*
 
-아래는 각 구현 Phase에서 Claude Code에 전달한 프롬프트의 핵심 구조입니다. 모든 프롬프트는 동일한 **4부 구성**(역할 부여 → 참조 문서 → 구현 상세 → 공통 규칙)을 따르며, Phase별로 담당 모듈과 features.json의 F-ID 범위가 달라집니다.
+각 구현 Phase에서 Claude Code (claude-sonnet-4-6)에 전달한 **프롬프트 원문 전체**를 [docs/prompts.md](docs/prompts.md)에 수록했습니다. 7개 Phase 프롬프트는 모두 동일한 4부 구성을 따릅니다:
 
-**프롬프트 공통 구조:**
+| 구성 | 내용 |
+|------|------|
+| **역할 부여** | "당신의 역할은 코비메디 PoC의 _____ 이다." |
+| **참조 문서** | architecture.md, policy_digest.md, 10_plan.md, features.json 중 해당 섹션 |
+| **구현 상세** | Critical로 표시된 세부 요구사항 3~5개 (방어 로직 포함) |
+| **공통 규칙** | Action Enum 7개 한정 / 저장소 진실원천 / 테스트 필수 / git commit |
 
-```
-[역할 부여]     "당신의 역할은 코비메디 PoC의 _____ 이다."
-[참조 문서]     architecture.md, policy_digest.md, 10_plan.md, features.json 중 해당 섹션
-[구현 상세]     Critical로 표시된 세부 요구사항 5~6개 (방어 로직 포함)
-[공통 규칙]     Action Enum 7개 한정 / 저장소 진실원천 / 테스트 필수 / git commit
-```
-
-| Phase | 역할 | 대상 모듈 | Feature ID | 핵심 지시 |
-|-------|------|----------|------------|----------|
-| **1. Storage & Identity** | 코어 데이터베이스 엔지니어 | `storage.py` | F-034~039, F-061~067 | bookings.json 진실원천 확립, 전화번호 우선 환자 식별, 필수 필드 강제, JSONDecodeError 폴백, 확정 직전 recheck |
-| **2. Safety Gate** | 보안 및 안전 제어 엔지니어 | `classifier.py` | F-001~010 | 파이프라인 최선행, 의료/인젝션/잡담 즉시 reject, 응급/불만 즉시 escalate, 혼합 요청 분리, 증상 안내≠진단 |
-| **3. Classification** | LLM 연동 및 자연어 처리 엔지니어 | `classifier.py`, `llm_client.py` | F-011~014, F-021~030, F-083~084 | Ollama format='json' 강제, JSON 파싱 폴백, 엔티티 추출 5종, 대리 예약 선제 감지, classified_intent vs action 분리 |
-| **4. Dialogue & Proxy** | 대화 상태 관리자 | `agent.py` | F-031~033, F-041~048 | 본인/대리인 최우선 분기, 정보 수집 타겟 스위칭, 큐+턴 관리(4회→escalate), 2단계 확정(pending_confirmation) |
-| **5. Policy Engine** | 비즈니스 정책 엔진 설계자 | `policy.py` | F-040, F-051~057 | LLM 호출 절대 금지, now 파라미터 필수, 24시간=86400초 정밀 판별, 정원+겹침 산술 검사, 대체 슬롯 1~3개 제안 |
-| **6. Output & Metrics** | 시스템 오케스트레이터 | `run.py`, `metrics.py` | F-081~082, F-091~094 | 배치 JSON 스키마 7필드 강제, reasoning 동적 연결, KPI 이벤트 카운팅 훅 |
-| **7. Cal.com (Q4)** | 외부 API 연동 전문가 | `calcom_client.py` | F-071~074 | API v2 헤더 버전 구분, 더미 이메일 생성, 선제적 슬롯 안내, Race Condition 409 방어, 배치 즉각 Drop, 거짓 성공 원천 차단 |
-
-**모든 프롬프트에 포함된 공통 규칙 (절대 준수):**
-
-1. **Action Enum**: `book_appointment`, `modify_appointment`, `cancel_appointment`, `check_appointment`, `clarify`, `escalate`, `reject` — 이 7개 외의 값은 절대 반환 금지
-2. **저장소 진실원천**: `ticket.context`는 힌트일 뿐, 모든 최종 판단은 `data/bookings.json` 기준
-3. **테스트 필수**: 구현한 모듈에 대한 pytest 단위 테스트를 반드시 작성하고 통과시킬 것 (Cal.com은 Mock 강제)
-4. **형상 관리**: `features.json` passes 갱신 → `progress.md` 상태 갱신 → `git commit`
-
-전체 프롬프트 원문은 `.ai/handoff/` 디렉토리의 각 Phase 문서에서 확인할 수 있습니다.
+| Phase | 프롬프트에서 부여한 역할 | 대상 모듈 |
+|-------|----------------------|----------|
+| 1. Storage & Identity | 코어 데이터베이스 엔지니어 | `storage.py` |
+| 2. Safety Gate | 보안 및 안전 제어 엔지니어 | `classifier.py` |
+| 3. Classification | LLM 연동 및 자연어 처리 엔지니어 | `classifier.py`, `llm_client.py` |
+| 4. Dialogue & Proxy | 대화 상태 관리자 | `agent.py` |
+| 5. Policy Engine | 비즈니스 정책 엔진 설계자 | `policy.py` |
+| 6. Output & Metrics | 시스템 오케스트레이터 | `run.py`, `metrics.py` |
+| 7. Cal.com (Q4) | 외부 API 연동 전문가 | `calcom_client.py` |
