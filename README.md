@@ -154,59 +154,53 @@
 
 ## 3. 시스템 아키텍처
 
-```
-사용자 발화
-  │
-  ▼
-┌─────────────────────────────────────────────────────┐
-│ 1. Safety Gate (classifier.py)                      │
-│    규칙 기반 패턴 → LLM 폴백                             │
-│    의료/인젝션/잡담 → reject                            │
-│    응급/불만/보험 → escalate                            │
-└──────────────┬──────────────────────────────────────┘
-               │ safe
-               ▼
-┌─────────────────────────────────────────────────────┐
-│ 2. 의도 분류 + 정보 추출 (classifier.py → Ollama)        │
-│    7개 action 판정 + 분과/날짜/시간/환자 정보 추출           │
-└──────────────┬──────────────────────────────────────┘
-               ▼
-┌─────────────────────────────────────────────────────┐
-│ 3. 대화 상태 병합 (agent.py)                           │
-│    멀티턴 누적 슬롯 관리, 4회 clarify → escalate         │
-└──────────────┬──────────────────────────────────────┘
-               ▼
-┌─────────────────────────────────────────────────────┐
-│ 4. 저장소 조회 (storage.py → bookings.json)            │
-│    전화번호 우선 식별, 초진/재진 판정                       │
-└──────────────┬──────────────────────────────────────┘
-               ▼
-┌─────────────────────────────────────────────────────┐
-│ 5. 정책 검사 (policy.py) — LLM 위임 금지                │
-│    운영시간, 정원, 슬롯 겹침, 24시간 룰                    │
-└──────────────┬──────────────────────────────────────┘
-               ▼
-┌─────────────────────────────────────────────────────┐
-│ 6. Cal.com 연동 (calcom_client.py) — Q4 선택          │
-│    슬롯 교차검증 + 예약 생성 + 실패 시 저장 차단        │
-└──────────────┬──────────────────────────────────────┘
-               ▼
-┌─────────────────────────────────────────────────────┐
-│ 7. 영속화 + 응답 (storage.py + response_builder.py)  │
-│    원자적 저장 + confidence/reasoning 동적 계산       │
-└─────────────────────────────────────────────────────┘
+### 파이프라인 흐름
+
+사용자 메시지가 입력되면 아래 7단계를 순서대로 거칩니다. 앞 단계에서 차단(reject/escalate)되면 뒷 단계는 실행되지 않습니다.
+
+```mermaid
+flowchart TD
+    A["사용자 발화"] --> B
+
+    B["① Safety Gate\n(classifier.py)\n규칙 기반 패턴 → LLM 폴백\n의료·인젝션·잡담 → reject\n응급·불만·보험 → escalate"]
+    B -->|safe| C
+
+    C["② 의도 분류 + 정보 추출\n(classifier.py → Ollama)\n7개 action 판정\n분과·날짜·시간·환자 정보 추출"]
+    C --> D
+
+    D["③ 대화 상태 병합\n(agent.py)\n멀티턴 누적 슬롯 관리\n4회 clarify 실패 → escalate"]
+    D --> E
+
+    E["④ 저장소 조회\n(storage.py → bookings.json)\n전화번호 우선 식별\n초진/재진 판정"]
+    E --> F
+
+    F["⑤ 정책 검사\n(policy.py) — LLM 위임 금지\n운영시간·정원·슬롯 겹침·24시간 룰"]
+    F --> G
+
+    G["⑥ Cal.com 연동\n(calcom_client.py) — Q4 선택\n슬롯 교차검증 + 예약 생성\n실패 시 로컬 저장 차단"]
+    G --> H
+
+    H["⑦ 영속화 + 응답\n(storage.py + response_builder.py)\n원자적 저장\nconfidence·reasoning 동적 계산"]
 ```
 
-```
-chat.py ──┐
-           ├──▶ src/agent.py (공유 핵심 로직)
-run.py  ──┘         │
-                     ├──▶ classifier.py ──▶ llm_client.py ──▶ Ollama
-                     ├──▶ policy.py (순수 산술)
-                     ├──▶ storage.py ──▶ bookings.json
-                     ├──▶ calcom_client.py ──▶ Cal.com API
-                     ├──▶ response_builder.py
-                     └──▶ metrics.py
+### 모듈 의존성
+
+```mermaid
+flowchart LR
+    chat["chat.py"] --> agent["src/agent.py\n(공유 핵심 로직)"]
+    run["run.py"] --> agent
+
+    agent --> classifier["classifier.py"]
+    agent --> policy["policy.py\n(순수 산술)"]
+    agent --> storage["storage.py"]
+    agent --> calcom["calcom_client.py"]
+    agent --> response["response_builder.py"]
+    agent --> metrics["metrics.py"]
+
+    classifier --> llm["llm_client.py"]
+    llm --> ollama["Ollama"]
+    storage --> bookings["bookings.json"]
+    calcom --> calcomapi["Cal.com API v2"]
 ```
 
 ---
