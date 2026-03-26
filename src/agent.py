@@ -2214,13 +2214,71 @@ def process_ticket(
                 cancel_booking(booking_id)
             except Exception:
                 logger.debug("로컬 예약 취소 실패: %s", booking_id)
-        # Cal.com 원격 취소
-        calcom_uid = target_existing_appointment.get("calcom_uid") or target_existing_appointment.get("uid")
+        calcom_uid = target_existing_appointment.get("calcom_uid")
         if calcom_uid and calcom_client.is_calcom_enabled(target_existing_appointment.get("department", "")):
             try:
                 calcom_client.cancel_booking_remote(calcom_uid)
             except Exception:
                 logger.debug("Cal.com 원격 취소 실패: uid=%s", calcom_uid)
+
+    # ── 예약 변경 실행: 기존 취소 + 신규 생성 (Cal.com은 수정 API 없음) ──
+    if action == "modify_appointment" and target_existing_appointment:
+        old_id = target_existing_appointment.get("id")
+        old_calcom_uid = target_existing_appointment.get("calcom_uid")
+        dept = target_existing_appointment.get("department") or department
+
+        # 1) 기존 예약 취소 (로컬)
+        if old_id:
+            try:
+                cancel_booking(old_id)
+            except Exception:
+                logger.debug("변경: 기존 예약 로컬 취소 실패: %s", old_id)
+
+        # 2) 기존 예약 취소 (Cal.com)
+        if old_calcom_uid and calcom_client.is_calcom_enabled(dept or ""):
+            try:
+                calcom_client.cancel_booking_remote(old_calcom_uid)
+            except Exception:
+                logger.debug("변경: Cal.com 기존 예약 취소 실패: uid=%s", old_calcom_uid)
+
+        # 3) 새 시간으로 예약 생성
+        new_appointment = {
+            "customer_name": ticket.get("customer_name") or (state or {}).get("customer_name"),
+            "patient_name": ticket.get("patient_name") or (state or {}).get("patient_name"),
+            "patient_contact": ticket.get("patient_contact") or (state or {}).get("patient_contact"),
+            "is_proxy_booking": bool(ticket.get("is_proxy_booking") or (state or {}).get("is_proxy_booking")),
+            "department": dept,
+            "date": merged_slots.get("date"),
+            "time": merged_slots.get("time"),
+            "booking_time": booking_time,
+            "customer_type": customer_type,
+        }
+
+        # Cal.com 새 예약 생성
+        if calcom_client.is_calcom_enabled(dept or ""):
+            try:
+                cc_new = calcom_client.create_booking(
+                    department=dept or "",
+                    date=merged_slots.get("date", ""),
+                    time=merged_slots.get("time", ""),
+                    patient_name=new_appointment.get("patient_name") or "",
+                    patient_contact=new_appointment.get("patient_contact") or "",
+                    customer_type=customer_type or "new",
+                )
+                if isinstance(cc_new, dict) and cc_new.get("uid"):
+                    new_appointment["calcom_uid"] = cc_new["uid"]
+                elif cc_new is None or cc_new is False:
+                    logger.debug("변경: Cal.com 새 예약 생성 실패")
+            except Exception:
+                logger.debug("변경: Cal.com 새 예약 생성 오류")
+
+        # 로컬 저장
+        try:
+            persisted = create_booking(new_appointment)
+            all_appointments.append(persisted)
+            target_existing_appointment = persisted
+        except Exception:
+            logger.debug("변경: 로컬 저장 실패")
 
     success_reference = target_existing_appointment or {
         "department": department,
