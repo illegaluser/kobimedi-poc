@@ -204,6 +204,40 @@ Turn 2: "네"
 
 ---
 
+## 3가지 테스트 레벨 비교
+
+본 프로젝트는 동일한 51개 시나리오를 3가지 서로 다른 방식으로 검증한다.
+
+| 구분 | 유닛 테스트 | E2E 테스트 | 시나리오 러너 |
+|------|-----------|-----------|-------------|
+| **파일** | `tests/test_scenarios.py` | `tests/test_e2e.py` | `scripts/run_scenario_tests.py` |
+| **실행** | `pytest tests/` | `pytest tests/test_e2e.py -m e2e` | `python scripts/run_scenario_tests.py` |
+| **LLM (Ollama)** | Mock (가짜 응답) | 실제 호출 | 실제 호출 |
+| **Storage** | Mock | 실제 (격리 tmp) | 실제 (격리 tmp) |
+| **Cal.com** | Mock | 실제 API | 실제 API |
+| **검증 수준** | 정확한 문자열 + action + 상태 | action enum만 (느슨) | action + 응답 내용 + 상태 전이 (상세) |
+| **출력 형식** | pytest PASS/FAIL | pytest PASS/FAIL | 턴별 대화 로그 + 결과 리포트 |
+| **속도** | ~9초 | ~70초 | ~80초 |
+| **환경 의존** | 없음 | Ollama + .env | Ollama + .env |
+
+**각 레벨의 목적:**
+
+- **유닛 테스트** — 각 컴포넌트(Safety, Policy, Storage, Cal.com)가 올바르게 연결되는지 **격리 검증**한다. CI/CD에서 빠르게 회귀를 잡는 용도.
+- **E2E 테스트** — 실제 LLM을 거쳐 **최종 action이 올바른지** 확인한다. LLM 비결정론을 허용하되, 핵심 판정(reject/escalate/book 등)이 틀리지 않는지 자동 검증.
+- **시나리오 러너** — `docs/test_scenarios.md`에 정의된 **대화 흐름을 그대로 재현**하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력한다. 비개발자도 "이 시나리오가 어떻게 동작하는지" 눈으로 확인할 수 있는 **데모/검수 용도**.
+
+**언제 무엇을 쓰는가:**
+
+| 상황 | 추천 테스트 |
+|------|-----------|
+| 코드 수정 후 빠른 회귀 확인 | `pytest tests/` (유닛, ~9초) |
+| LLM 모델 변경 후 품질 확인 | `python scripts/run_scenario_tests.py` (시나리오 러너) |
+| Cal.com 연동 상태 점검 | `./scripts/run_tests.sh --e2e` |
+| 비개발자에게 동작 데모 | `python scripts/run_scenario_tests.py --category 1` |
+| 전체 품질 보증 | `./scripts/run_tests.sh --all` |
+
+---
+
 ## 테스트 실행 방법
 
 ```bash
