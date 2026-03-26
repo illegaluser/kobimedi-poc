@@ -605,10 +605,50 @@ kobimedi-poc/
 
 ## 9. AI 도구 활용
 
-| 도구 | 용도 |
-|------|------|
-| Claude Code (Anthropic CLI) | 아키텍처 설계, 구현, 테스트 작성, 코드 리뷰, 문서 생성 |
-| Ollama + qwen3-coder:30b | 챗봇 LLM (Safety gate 폴백, 의도 분류, 정보 추출) |
-| Cal.com API v2 | 외부 예약 시스템 연동 (Q4) |
+### 사용 도구
 
-AI 코딩 에이전트 활용 harness: `.ai/handoff/` 디렉토리 참조.
+| 도구 | 역할 | 활용 내용 |
+|------|------|----------|
+| **Claude Code** (Anthropic CLI, claude-opus-4-6) | 코드 작성 | 아키텍처 설계, 핵심 로직 구현(`src/` 전체), 테스트 작성(226개 유닛 + 51개 시나리오), 문서 생성, 스크립트 작성 |
+| **Gemini 2.5 Pro** (Google) | 코드 리뷰 | 구현된 코드의 정책 준수 여부 검토, AGENTS.md Non-Negotiables 대비 검증, 엣지 케이스 발굴 |
+| **Ollama + qwen3-coder:30b** | 챗봇 LLM | Safety gate LLM 폴백, 사용자 메시지 의도 분류, 분과/날짜/시간/환자 정보 추출 |
+| **Cal.com API v2** | 외부 예약 시스템 | 가용 슬롯 조회, 실제 예약 생성, 예약 취소 (Q4 선택과제) |
+
+### 활용 패턴: Planner → Implementer → Reviewer
+
+AI 도구를 단순한 코드 생성기가 아닌 **역할 분담 구조**로 활용했습니다.
+
+| 단계 | 담당 | 수행 내용 |
+|------|------|----------|
+| **Plan** | Claude Code | 과제 요구사항 분석 → `.ai/handoff/10_plan.md` 작업 계획 수립, `features.json` 기능 체크리스트 자동 생성 |
+| **Implement** | Claude Code | TDD 기반 체크리스트를 따라 `src/` 핵심 로직 작성, 테스트 코드 작성, 정책 엔진 구현 |
+| **Review** | Gemini 2.5 Pro | CLAUDE.md의 10가지 Review Priorities 기준으로 구현 검토, 의료 상담 우회 가능성·정책 결정론 위반·거짓 성공 등 검증 |
+
+### AI 에이전트 Harness
+
+코딩 에이전트가 프로젝트를 이해하고 일관되게 작업할 수 있도록, 아래 harness 문서들을 작성하여 사용했습니다.
+
+**`.ai/handoff/`** — 에이전트 간 작업 인수인계 문서:
+
+| 파일 | 용도 |
+|------|------|
+| `00_request.md` | 과제 원문 + 진료 예약 정책 전문 |
+| `10_plan.md` | 전체 구현 계획 (Phase별 작업 순서) |
+| `20_impl.md` | 상세 구현 갭 분석 + Phase별 작업 항목 |
+| `30_review.md` | 리뷰 결과 + 수정 사항 |
+| `01_q4_request.md` ~ `05_q4_architecture.md` | Q4 Cal.com 연동 전용 계획/구현/아키텍처 |
+
+**`.ai/harness/`** — 에이전트 실행 제어:
+
+| 파일 | 용도 |
+|------|------|
+| `features.json` | 기능 정의 + 구현 체크리스트 (F-001 ~ F-103, passes 필드로 통과 여부 추적) |
+| `progress.md` | 작업 진행 현황 기록 |
+
+**`CLAUDE.md`** — 에이전트 행동 지침:
+
+Claude Code가 reviewer/tester 역할을 수행할 때 준수해야 할 10가지 검토 우선순위를 정의합니다. 의료 상담 우회 가능성, action enum 원문 일치, safety gate 선행 여부, 정책 결정론 준수 등을 명시하여, AI가 코드를 리뷰할 때 일관된 기준을 적용하도록 했습니다.
+
+**`AGENTS.md`** — Non-Negotiables:
+
+에이전트가 절대 위반해서는 안 되는 규칙(chat.py/run.py 로직 공유, 7개 action enum, safety gate 최선행, LLM 정책 위임 금지 등)을 정의합니다. 구현 단계에서 이 문서를 참조하여 아키텍처 일탈을 방지했습니다.
