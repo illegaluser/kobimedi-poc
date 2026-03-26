@@ -322,6 +322,128 @@ class TestE2EDepartment:
 
 
 # ─────────────────────────────────────────────────────────────
+# Category 7: 운영시간 정책 (Operating Hours)
+# ─────────────────────────────────────────────────────────────
+
+class TestE2EOperatingHours:
+    """실제 LLM → 정책 엔진까지 운영시간 규칙이 올바르게 적용되는지 검증한다."""
+
+    @e2e_full
+    def test_7_1_sunday_blocked(self, isolated_bookings):
+        """일요일 예약 시도 → LLM이 날짜 추출 → 정책 엔진이 휴진 차단."""
+        result = process_ticket(
+            {
+                "customer_name": "김민수",
+                "customer_type": "재진",
+                "message": f"{E2E_NEXT_SUNDAY} 오전 10시에 내과 예약하고 싶습니다",
+                "patient_name": "김민수",
+                "patient_contact": "010-1234-5678",
+                "is_proxy_booking": False,
+            },
+            session_state=None,
+            now=E2E_NOW,
+        )
+        _assert_valid_action(result)
+        # 일요일이므로 book 불가 — clarify(휴진 안내) 또는 reject
+        assert result["action"] in {"clarify", "reject"}
+        assert result["action"] != "book_appointment"
+
+    @e2e_full
+    def test_7_2_saturday_afternoon_blocked(self, isolated_bookings):
+        """토요일 오후 예약 시도 → 13:00 이후 차단."""
+        result = process_ticket(
+            {
+                "customer_name": "김민수",
+                "customer_type": "재진",
+                "message": f"{E2E_NEXT_SATURDAY} 오후 3시에 내과 예약하고 싶습니다",
+                "patient_name": "김민수",
+                "patient_contact": "010-1234-5678",
+                "is_proxy_booking": False,
+            },
+            session_state=None,
+            now=E2E_NOW,
+        )
+        _assert_valid_action(result)
+        assert result["action"] in {"clarify", "reject"}
+        assert result["action"] != "book_appointment"
+
+    @e2e_full
+    def test_7_3_lunch_break_blocked(self, isolated_bookings):
+        """점심시간(12:30-13:30) 예약 시도 → 차단."""
+        result = process_ticket(
+            {
+                "customer_name": "김민수",
+                "customer_type": "재진",
+                "message": f"{E2E_TOMORROW} 낮 12시 반에 내과 예약해주세요",
+                "patient_name": "김민수",
+                "patient_contact": "010-1234-5678",
+                "is_proxy_booking": False,
+            },
+            session_state=None,
+            now=E2E_NOW,
+        )
+        _assert_valid_action(result)
+        assert result["action"] in {"clarify", "reject"}
+        assert result["action"] != "book_appointment"
+
+    @e2e_full
+    def test_7_4_before_9am_blocked(self, isolated_bookings):
+        """오전 9시 전 예약 시도 → 차단."""
+        result = process_ticket(
+            {
+                "customer_name": "김민수",
+                "customer_type": "재진",
+                "message": f"{E2E_TOMORROW} 아침 7시에 정형외과 예약해주세요",
+                "patient_name": "김민수",
+                "patient_contact": "010-1234-5678",
+                "is_proxy_booking": False,
+            },
+            session_state=None,
+            now=E2E_NOW,
+        )
+        _assert_valid_action(result)
+        assert result["action"] in {"clarify", "reject"}
+        assert result["action"] != "book_appointment"
+
+    @e2e_full
+    def test_7_5_saturday_morning_ok(self, isolated_bookings):
+        """토요일 오전 예약 → 정상 통과 가능."""
+        result = process_ticket(
+            {
+                "customer_name": "김민수",
+                "customer_type": "재진",
+                "message": f"{E2E_NEXT_SATURDAY} 오전 10시에 내과 예약하고 싶습니다",
+                "patient_name": "김민수",
+                "patient_contact": "010-1234-5678",
+                "is_proxy_booking": False,
+            },
+            session_state=None,
+            now=E2E_NOW,
+        )
+        _assert_valid_action(result)
+        # 토요일 오전은 정상 — book 또는 cal.com 상태에 따라 clarify
+        assert result["action"] in {"book_appointment", "clarify"}
+
+    @e2e_full
+    def test_7_6_weekday_normal_hours_ok(self, isolated_bookings):
+        """평일 정상 시간 예약 → 정상 통과 가능."""
+        result = process_ticket(
+            {
+                "customer_name": "김민수",
+                "customer_type": "재진",
+                "message": f"{E2E_TOMORROW} 오후 2시에 이비인후과 예약하고 싶습니다",
+                "patient_name": "김민수",
+                "patient_contact": "010-1234-5678",
+                "is_proxy_booking": False,
+            },
+            session_state=None,
+            now=E2E_NOW,
+        )
+        _assert_valid_action(result)
+        assert result["action"] in {"book_appointment", "clarify"}
+
+
+# ─────────────────────────────────────────────────────────────
 # Category 8: 대화 상태 관리
 # ─────────────────────────────────────────────────────────────
 
