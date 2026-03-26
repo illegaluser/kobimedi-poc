@@ -309,7 +309,24 @@ ollama list
 
 Cal.com 연동(Q4 선택과제)을 사용하려면 `.env` 파일을 프로젝트 루트에 생성합니다.
 
-> **Cal.com 연동 없이도 챗봇은 정상 동작합니다.** `.env` 파일이 없으면 로컬 정책 엔진만으로 예약을 처리합니다 (Graceful Degradation). Cal.com은 외부 캘린더와의 연동이 필요한 경우에만 설정하세요.
+> **Cal.com 연동 없이도 챗봇은 정상 동작합니다.** `.env` 파일이 없거나 `CALCOM_API_KEY`가 비어 있으면 `calcom_client.is_calcom_enabled()`가 `False`를 반환하여 Cal.com 관련 코드가 자동으로 건너뛰어집니다 (Graceful Degradation).
+
+**`.env` 미설정 시 동작 흐름:**
+
+Cal.com 없이도 예약의 전체 생명주기(조회 → 정책 검사 → 저장)가 로컬에서 완결됩니다.
+
+- **가용 시간 조회**: Cal.com 슬롯 API를 호출하지 않고, `policy.py`의 운영시간/정원/슬롯 겹침 규칙만으로 예약 가능 여부를 판단합니다.
+- **예약 저장**: `data/bookings.json` 파일에 직접 기록합니다 (Cal.com 캘린더에는 이벤트가 생성되지 않습니다).
+- **예약 조회/변경/취소**: `storage.py`가 `bookings.json`을 진실원천(Source of Truth)으로 사용하여 모든 조회/변경/취소를 처리합니다.
+- **정책 검사**: `policy.py`가 운영시간, 정원(1시간 3명), 24시간 룰, 초진/재진 슬롯 등 모든 규칙을 로컬에서 산술 검사합니다.
+
+**`.env` 설정 시 동작 흐름 (Cal.com 연동):**
+
+Cal.com이 활성화되면 로컬 정책 검사에 더해 외부 캘린더와의 **이중 검증**이 추가됩니다.
+
+- **예약 전**: `calcom_client.get_available_slots()`로 Cal.com의 실제 가용 시간을 조회하여, 로컬 정책을 통과했더라도 Cal.com에서 이미 마감된 슬롯은 차단합니다.
+- **예약 시**: `calcom_client.create_booking()`으로 Cal.com 캘린더에 실제 이벤트를 생성한 뒤, 성공한 경우에만 `bookings.json`에 로컬 저장합니다.
+- **Cal.com 실패 시**: 타임아웃이나 서버 오류가 발생하면 **로컬 저장도 하지 않고** "외부 시스템 응답 지연"으로 안내합니다. 거짓 성공(Cal.com에는 예약이 없는데 로컬에만 기록)을 구조적으로 방지합니다.
 
 ```bash
 # .env 파일을 프로젝트 루트(kobimedi-poc/)에 생성
