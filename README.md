@@ -111,7 +111,7 @@
 
 | 요구사항 | 구현 | 검증 |
 |---------|------|------|
-| 7개 Action 분류 (book/modify/cancel/check/clarify/escalate/reject) | `src/classifier.py` + `src/agent.py` | [전체 9개 카테고리 51개 시나리오](docs/test_scenarios.md) |
+| 7개 Action 분류 (book/modify/cancel/check/clarify/escalate/reject) | `src/classifier.py` + `src/agent.py` | [전체 10개 카테고리 61개 시나리오](docs/test_scenarios.md) |
 | 두 모드가 동일한 Agent 로직 공유 | `chat.py`, `run.py` 모두 `src/agent.py`의 `process_ticket()` 호출 | `test_dialogue.py::test_F048` |
 | 진료 예약 정책 위반 판단 | `src/policy.py` (결정론, LLM 위임 금지) | [3. 정책엔진](docs/test_scenarios.md#3-정책-엔진-슬롯-계산-deterministic-policy)(3-1~3-5), [4. 24시간룰](docs/test_scenarios.md#4-24시간-변경취소-규칙-modification--cancellation)(4-1~4-5), [7. 운영시간](docs/test_scenarios.md#7-운영시간-정책-operating-hours-f-052)(7-1~7-12) |
 | 의료 상담 / 목적 외 사용 거부 | `src/classifier.py` Safety Gate (규칙 기반 + LLM 폴백) | [5. Safety Gate](docs/test_scenarios.md#5-safety-gate-safety--clarification)(5-1~5-7) |
@@ -407,17 +407,17 @@ git clone <repo> && cd kobimedi-poc && ./scripts/init.sh && python chat.py
 
 이 프로젝트는 **유닛 테스트**와 **시나리오 테스트** 두 가지 레벨로 품질을 검증합니다.
 
-### 유닛 테스트 (226개)
+### 유닛 테스트 (236개)
 
 외부 의존성(LLM, Cal.com)을 Mock으로 대체하여 각 컴포넌트를 격리 검증합니다. Ollama나 네트워크 없이도 실행 가능하며, **코드 수정 후 빠르게 회귀를 잡는 용도**입니다.
 
 ```bash
-pytest tests/ -v    # 약 9초, 226 passed
+pytest tests/ -v    # 약 18초, 236 passed
 ```
 
 | 파일 | 수량 | 검증 대상 |
 |------|------|----------|
-| `test_scenarios.py` | 51 | 9개 카테고리 시나리오 (예약, 환자 식별, 정책, 안전, Cal.com 등) |
+| `test_scenarios.py` | 61 | 10개 카테고리 시나리오 (예약, 환자 식별, 정책, 안전, Cal.com, 예약→변경→취소 등) |
 | `test_calcom.py` | 51 | Cal.com API 연동 (슬롯 조회, 예약 생성, 취소, Race Condition, 장애 복구) |
 | `test_safety.py` | 35 | Safety gate (의료 상담 차단, 인젝션 방어, 증상 안내, 혼합 요청 분리) |
 | `test_response_builder.py` | 27 | 응답 메시지 생성 (본인/대리 질문, 이름/연락처 수집, 분과/시간 안내) |
@@ -428,12 +428,12 @@ pytest tests/ -v    # 약 9초, 226 passed
 | `test_generalization.py` | 3 | 일반화 (한국어 인젝션, 혼합 요청, 모호한 환자 유형) |
 | `test_batch.py` | 1 | 배치 모드 (run.py 출력 JSON 스키마 + KPI 메트릭) |
 
-### [시나리오 테스트 (51개)](docs/test_scenarios.md)
+### [시나리오 테스트 (61개)](docs/test_scenarios.md)
 
 실제 Ollama LLM과 Cal.com API를 호출하여 **사용자 발화 → 챗봇 응답 → 상태 전이**의 대화 흐름 전체를 검증합니다. LLM 모델 변경이나 프롬프트 수정 후 **실제 동작 품질을 확인하는 용도**입니다.
 
 ```bash
-python scripts/run_scenario_tests.py    # 약 80초, 51개 시나리오
+python scripts/run_scenario_tests.py    # 약 90초, 61개 시나리오
 
 # 특정 카테고리만 실행
 python scripts/run_scenario_tests.py --category 5    # Safety Gate만
@@ -500,7 +500,7 @@ python scripts/run_scenario_tests.py --policy-only
 
 ### `scripts/run_scenario_tests.py` — 시나리오 테스트 러너
 
-[docs/test_scenarios.md](docs/test_scenarios.md)에 정의된 51개 시나리오를 실제 LLM으로 실행하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력합니다. 비개발자에게 동작을 데모하거나, LLM 모델 변경 후 품질을 검수할 때 유용합니다.
+[docs/test_scenarios.md](docs/test_scenarios.md)에 정의된 61개 시나리오를 실제 LLM으로 실행하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력합니다. 비개발자에게 동작을 데모하거나, LLM 모델 변경 후 품질을 검수할 때 유용합니다.
 
 ```bash
 python scripts/run_scenario_tests.py                    # 전체 9개 카테고리
@@ -552,7 +552,7 @@ kobimedi-poc/
     ├── architecture.md          # 아키텍처 설계
     ├── policy_digest.md         # 예약 정책 요약
     ├── demo_evidence.md         # 데모 증빙
-    ├── test_scenarios.md        # 시나리오 명세 (51개)
+    ├── test_scenarios.md        # 시나리오 명세 (61개)
     ├── prompts.md               # 구현 프롬프트 원문 (Phase 1~7)
     ├── test_results_unit.txt    # 유닛 테스트 결과
     └── test_results_scenario.txt # 시나리오 테스트 결과
@@ -609,7 +609,7 @@ kobimedi-poc/
 | 도구 | 역할 | 활용 내용 |
 |------|------|----------|
 | **ChatGPT 5.4** (OpenAI) | 계획 수립 | 과제 요구사항 분석, 아키텍처 설계 방향 결정, `.ai/handoff/10_plan.md` 작업 계획 초안 작성, `features.json` 기능 체크리스트 설계 |
-| **Claude Code** (Anthropic, claude-sonnet-4-6) | 코드 작성 | 핵심 로직 구현(`src/` 전체), 테스트 작성(226개 유닛 + 51개 시나리오), 문서 생성, 운영 스크립트 작성 |
+| **Claude Code** (Anthropic, claude-sonnet-4-6) | 코드 작성 | 핵심 로직 구현(`src/` 전체), 테스트 작성(236개 유닛 + 61개 시나리오), 문서 생성, 운영 스크립트 작성 |
 | **Gemini 2.5 Pro** (Google) | 코드 리뷰 | 구현된 코드의 정책 준수 여부 검토, AGENTS.md Non-Negotiables 대비 검증, 엣지 케이스 발굴 |
 | **Cline** (VS Code Extension) | 에이전트 오케스트레이션 | 위 AI 도구들을 하나의 워크플로로 연결. 계획→구현→리뷰→수정 사이클을 IDE 안에서 관리 |
 | **Ollama + qwen3-coder:30b** | 챗봇 LLM (런타임) | Safety gate LLM 폴백, 사용자 메시지 의도 분류, 분과/날짜/시간/환자 정보 추출 |

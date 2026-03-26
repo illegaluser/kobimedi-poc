@@ -1,5 +1,5 @@
 """
-tests/test_scenarios.py — 51개 E2E 시나리오 테스트
+tests/test_scenarios.py — 61개 E2E 시나리오 테스트
 
 Category 1: 정상 예약 완료 (Happy Path)                    1-1 ~ 1-4
 Category 2: 환자 식별 & 대리 예약 (Identity & Proxy)       2-1 ~ 2-4
@@ -10,6 +10,7 @@ Category 6: 분과 및 운영시간 (Department & Hours)           6-1 ~ 6-3
 Category 7: 운영시간 정책 (Operating Hours, F-052)         7-1 ~ 7-12
 Category 8: 대화 상태 관리 (Dialogue State Machine)         8-1 ~ 8-3
 Category 9: Q4 Cal.com 외부 연동 (External Integration)    9-1 ~ 9-8
+Category 10: 예약→변경→취소 전체 플로우 (Book→Modify→Cancel) 10-1 ~ 10-10
 """
 from __future__ import annotations
 
@@ -1538,3 +1539,158 @@ class TestCalcomIntegration:
         assert result["action"] == "clarify"
         assert "응답 지연" in result["response"] or "처리가 불가" in result["response"]
         mock_create_booking.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────
+# Category 10: 예약→변경→취소 전체 플로우 (Book→Modify→Cancel with Cal.com)
+# ─────────────────────────────────────────────────────────────
+
+# 다양한 구어체/격식체 발화 조합
+_MODIFY_UTTERANCES = [
+    ("예약 변경할래요", "3월 27일 오후 3시로요", "2026-03-27", "15:00"),
+    ("예약 수정해주세요", "3/28 오전 10시", "2026-03-28", "10:00"),
+    ("시간 바꿔줘", "3월 30일 오후 2시", "2026-03-30", "14:00"),
+    ("예약 옮겨주세요", "4/1 오전 11시", "2026-04-01", "11:00"),
+    ("날짜를 변경하고 싶어요", "4월 2일 오후 4시", "2026-04-02", "16:00"),
+]
+_CANCEL_UTTERANCES = [
+    "예약 취소할게요", "예약 취소해주세요", "그 예약 빼줘", "안 갈래요", "예약 취소 부탁드립니다",
+]
+_BMC_SCENARIOS = []
+for _i, (_mr, _ms, _nd, _nt) in enumerate(_MODIFY_UTTERANCES):
+    _BMC_SCENARIOS.append((_mr, _ms, _nd, _nt, _CANCEL_UTTERANCES[_i]))
+for _mi, _ci in [(0, 2), (1, 3), (2, 4), (3, 0), (4, 1)]:
+    _mr, _ms, _nd, _nt = _MODIFY_UTTERANCES[_mi]
+    _BMC_SCENARIOS.append((_mr, _ms, _nd, _nt, _CANCEL_UTTERANCES[_ci]))
+
+
+def _bmc_intent(action, department="내과", date="2026-03-25", time="14:00", **extra):
+    base = {"action": action, "department": department, "date": date, "time": time, "missing_info": [], **extra}
+
+    def _se(message, *args, **kwargs):
+        result = dict(base)
+        phone_match = re.search(r"01[0-9][- ]?\d{3,4}[- ]?\d{4}", message)
+        if phone_match:
+            raw = re.sub(r"[- ]", "", phone_match.group(0))
+            result["patient_contact"] = f"{raw[:3]}-{raw[3:7]}-{raw[7:]}"
+        name_match = re.search(r"([가-힣]{2,4})\s+01[0-9]", message)
+        if not name_match:
+            name_match = re.search(r"([가-힣]{2,4}),?\s+01[0-9]", message)
+        if name_match:
+            result["patient_name"] = name_match.group(1)
+        return result
+
+    return _se
+
+
+_BOOKED_BMC = {
+    "id": "b-flow-001", "customer_name": "김민수", "patient_name": "김민수",
+    "patient_contact": "010-1234-5678", "is_proxy_booking": False,
+    "department": "내과", "date": "2026-03-25", "time": "14:00",
+    "booking_time": "2026-03-25T14:00:00+00:00", "customer_type": "재진", "status": "active",
+}
+
+
+def _run_book_with_calcom(mock_safety, mock_intent, mock_policy, mock_resolve, mock_create):
+    mock_safety.return_value = SAFE_RESULT
+    mock_intent.side_effect = _bmc_intent("book_appointment")
+    mock_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
+    mock_resolve.return_value = _resolve_revisit()
+    mock_create.return_value = dict(_BOOKED_BMC)
+
+    ss = {}
+    tb = {"customer_name": "김민수", "customer_type": "재진"}
+    r = process_ticket({**tb, "message": "내일 2시 내과 예약하고 싶어요"},
+                       all_appointments=[], existing_appointment=None, session_state=ss, now=REFERENCE_NOW)
+    assert r["action"] == "clarify" and "본인이신가요" in r["response"]
+    r = process_ticket({"message": "본인이에요"},
+                       all_appointments=[], existing_appointment=None, session_state=ss, now=REFERENCE_NOW)
+    assert r["action"] == "clarify"
+    r = process_ticket({"message": "김민수 010-1234-5678"},
+                       all_appointments=[], existing_appointment=None, session_state=ss, now=REFERENCE_NOW)
+    assert r["action"] == "clarify" and "예약할까요" in r["response"]
+    r = process_ticket({"message": "네"},
+                       all_appointments=[], existing_appointment=None, session_state=ss, now=REFERENCE_NOW)
+    assert r["action"] == "book_appointment"
+    mock_create.assert_called_once()
+    return ss
+
+
+class TestBookModifyCancelFlow:
+    """예약→변경→취소 전체 흐름을 Cal.com 연동 포함 다양한 발화로 검증한다. (10-1 ~ 10-10)"""
+
+    @pytest.mark.parametrize(
+        "modify_req,modify_slot,new_date,new_time,cancel_req",
+        [pytest.param(*s, id=f"10-{i+1}") for i, s in enumerate(_BMC_SCENARIOS)],
+    )
+    @patch("src.agent.create_booking")
+    @patch("src.agent.resolve_customer_type_from_history")
+    @patch("src.agent.apply_policy")
+    @patch("src.agent.classify_intent")
+    @patch("src.agent.classify_safety")
+    def test_full_flow(
+        self, mock_safety, mock_intent, mock_policy, mock_resolve, mock_create,
+        modify_req, modify_slot, new_date, new_time, cancel_req,
+    ):
+        # ── Phase 1: 예약 (Cal.com 슬롯 검증 포함) ──
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False), \
+             patch("src.calcom_client.get_available_slots", return_value=["14:00", "15:00"]), \
+             patch("src.calcom_client.create_booking", return_value={"uid": "calcom-001"}):
+            ss = _run_book_with_calcom(mock_safety, mock_intent, mock_policy, mock_resolve, mock_create)
+
+        booked = dict(_BOOKED_BMC)
+        all_appts = [booked]
+
+        # ── Phase 2: 변경 (Cal.com 슬롯 교차 검증) ──
+        mock_intent.side_effect = _bmc_intent("modify_appointment", date=None, time=None)
+        mock_policy.return_value = PolicyResult(action=Action.MODIFY_APPOINTMENT)
+
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False), \
+             patch("src.calcom_client.get_available_slots", return_value=[new_time]):
+            r = process_ticket({"message": modify_req}, all_appointments=all_appts,
+                               existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+            assert r["action"] == "clarify"
+
+            while r["action"] == "clarify":
+                if "본인이신가요" in r["response"]:
+                    r = process_ticket({"message": "본인"}, all_appointments=all_appts,
+                                       existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+                elif "연락처" in r["response"] or "성함" in r["response"]:
+                    r = process_ticket({"message": "김민수 010-1234-5678"}, all_appointments=all_appts,
+                                       existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+                elif "날짜" in r["response"] or "시간" in r["response"] or "언제" in r["response"]:
+                    mock_intent.side_effect = _bmc_intent("modify_appointment", date=new_date, time=new_time)
+                    r = process_ticket({"message": modify_slot}, all_appointments=all_appts,
+                                       existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+                else:
+                    break
+
+        assert r["action"] == "modify_appointment", (
+            f"변경 완료 기대했으나 action={r['action']}, response={r['response']}")
+        assert "변경" in r["response"]
+
+        booked["date"], booked["time"] = new_date, new_time
+        booked["booking_time"] = f"{new_date}T{new_time}:00+00:00"
+
+        # ── Phase 3: 취소 ──
+        mock_intent.side_effect = _bmc_intent("cancel_appointment", date=new_date, time=new_time)
+        mock_policy.return_value = PolicyResult(action=Action.CANCEL_APPOINTMENT)
+
+        r = process_ticket({"message": cancel_req}, all_appointments=all_appts,
+                           existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+
+        max_turns = 5
+        while r["action"] == "clarify" and max_turns > 0:
+            max_turns -= 1
+            if "본인이신가요" in r["response"]:
+                r = process_ticket({"message": "본인"}, all_appointments=all_appts,
+                                   existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+            elif "연락처" in r["response"] or "성함" in r["response"]:
+                r = process_ticket({"message": "김민수 010-1234-5678"}, all_appointments=all_appts,
+                                   existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+            else:
+                break
+
+        assert r["action"] == "cancel_appointment", (
+            f"취소 완료 기대했으나 action={r['action']}, response={r['response']}")
+        assert "취소" in r["response"]

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-scripts/run_scenario_tests.py — 9개 카테고리 시나리오 테스트 러너
+scripts/run_scenario_tests.py — 10개 카테고리 시나리오 테스트 러너
 
-docs/test_scenarios.md에 정의된 51개 시나리오를 실제 실행하고 결과를 리포트한다.
+docs/test_scenarios.md에 정의된 61개 시나리오를 실제 실행하고 결과를 리포트한다.
 - 카테고리 1,2,5,6,8,9: 실제 Ollama LLM + Storage + Cal.com
 - 카테고리 3,4,7: policy.py 직접 호출 (LLM 불필요)
 
@@ -778,6 +778,85 @@ def run_category_9():
 # 메인
 # ═══════════════════════════════════════════════════════════════
 
+def run_category_10():
+    R.log("\n━━━ Category 10: 예약→변경→취소 전체 플로우 ━━━")
+    if not OLLAMA_OK:
+        R.log("  [SKIP] Ollama 미구동")
+        for _ in range(10):
+            _scenario_result(False, skip=True)
+        return
+
+    future_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
+    future_display = (datetime.now() + timedelta(days=14)).strftime("%-m월 %-d일")
+
+    modify_cases = [
+        ("예약 변경할래요", f"{future_display} 오후 3시로요"),
+        ("예약 수정해주세요", f"{future_display} 오전 10시"),
+        ("시간 바꿔줘", f"{future_display} 오후 2시"),
+        ("예약 옮겨주세요", f"{future_display} 오전 11시"),
+        ("날짜를 변경하고 싶어요", f"{future_display} 오후 4시"),
+    ]
+    cancel_cases = [
+        "예약 취소할게요", "예약 취소해주세요", "그 예약 빼줘", "안 갈래요", "예약 취소 부탁드립니다",
+    ]
+    # 10 scenarios: 5 direct + 5 cross
+    combos = [(i, i) for i in range(5)] + [(0, 2), (1, 3), (2, 4), (3, 0), (4, 1)]
+
+    for idx, (mi, ci) in enumerate(combos, start=1):
+        mod_req, mod_slot = modify_cases[mi]
+        cancel_req = cancel_cases[ci]
+        _scenario_header(f"10-{idx}", f"예약→변경({mod_req[:6]})→취소({cancel_req[:6]})")
+        _setup_isolated_storage()
+        try:
+            # Phase 1: 예약
+            session = _new_session(customer_name="김민수", customer_type="재진")
+            r = _send(session, f"{TOMORROW} 오후 2시 내과 예약하고 싶어요")
+            if "본인" in r.get("response", ""):
+                r = _send(session, "본인이에요")
+            if "연락처" in r.get("response", "") or "성함" in r.get("response", ""):
+                r = _send(session, "김민수 010-1234-5678")
+            if "예약할까요" in r.get("response", ""):
+                r = _send(session, "네")
+            book_ok = r.get("action") == "book_appointment"
+
+            # Phase 2: 변경
+            r = _send(session, mod_req)
+            for _ in range(5):
+                if r.get("action") != "clarify":
+                    break
+                resp = r.get("response", "")
+                if "본인" in resp:
+                    r = _send(session, "본인")
+                elif "연락처" in resp or "성함" in resp:
+                    r = _send(session, "김민수 010-1234-5678")
+                elif "날짜" in resp or "시간" in resp or "언제" in resp:
+                    r = _send(session, mod_slot)
+                else:
+                    break
+            modify_ok = r.get("action") == "modify_appointment"
+
+            # Phase 3: 취소
+            r = _send(session, cancel_req)
+            for _ in range(5):
+                if r.get("action") != "clarify":
+                    break
+                resp = r.get("response", "")
+                if "본인" in resp:
+                    r = _send(session, "본인")
+                elif "연락처" in resp or "성함" in resp:
+                    r = _send(session, "김민수 010-1234-5678")
+                else:
+                    break
+            cancel_ok = r.get("action") == "cancel_appointment"
+
+            ok = book_ok and modify_ok and cancel_ok
+            if not ok:
+                R.log(f"    book={book_ok} modify={modify_ok} cancel={cancel_ok}")
+            _scenario_result(ok)
+        finally:
+            _teardown_isolated_storage()
+
+
 CATEGORIES = {
     1: ("정상 예약 완료", run_category_1),
     2: ("환자 식별 & 대리 예약", run_category_2),
@@ -788,6 +867,7 @@ CATEGORIES = {
     7: ("운영시간 정책", run_category_7),
     8: ("대화 상태 관리", run_category_8),
     9: ("Cal.com 외부 연동", run_category_9),
+    10: ("예약→변경→취소 전체 플로우", run_category_10),
 }
 
 POLICY_ONLY = {3, 4, 7}
