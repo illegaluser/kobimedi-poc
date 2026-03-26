@@ -1870,6 +1870,34 @@ def process_ticket(
             customer_type=customer_type,
         )
 
+    if action == "escalate":
+        record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+        return _build_response_and_record(
+            state,
+            action="escalate",
+            message="해당 요청은 상담원이 확인 후 안내드려야 합니다. 상담원 연결을 도와드릴게요.",
+            department=department,
+            ticket=ticket,
+            classified_intent=classified_intent,
+            safety_result=safety_result,
+            intent_result=intent_result,
+            customer_type=customer_type,
+        )
+
+    if action == "reject":
+        record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+        return _build_response_and_record(
+            state,
+            action="reject",
+            message="코비메디 예약 관련 문의만 도와드릴 수 있습니다.",
+            department=department,
+            ticket=ticket,
+            classified_intent=classified_intent,
+            safety_result=safety_result,
+            intent_result=intent_result,
+            customer_type=customer_type,
+        )
+
     if action == "book_appointment":
         customer_type = (history_resolution or {}).get("customer_type")
         if state is not None:
