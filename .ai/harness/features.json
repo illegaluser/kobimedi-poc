@@ -477,7 +477,7 @@
       "policy_ref": "policy_digest §3",
       "priority": 1,
       "status": "required",
-      "test_ref": "tests/test_policy.py",
+      "test_ref": "tests/test_scenarios.py::TestOperatingHours",
       "passes": true
     },
     {

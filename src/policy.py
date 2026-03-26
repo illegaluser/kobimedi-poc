@@ -3,6 +3,14 @@ from datetime import datetime, timedelta, time
 
 from src.models import Ticket, Booking, PolicyResult, Action
 
+# ── 운영시간 상수 (F-052) ──
+_WEEKDAY_OPEN = time(9, 0)
+_WEEKDAY_CLOSE = time(18, 0)
+_SATURDAY_OPEN = time(9, 0)
+_SATURDAY_CLOSE = time(13, 0)
+_LUNCH_START = time(12, 30)
+_LUNCH_END = time(13, 30)
+
 def _ensure_datetime(timestamp: str | datetime) -> datetime:
     if isinstance(timestamp, datetime):
         return timestamp
@@ -160,6 +168,51 @@ def is_change_or_cancel_allowed(appointment_time: datetime | str, now: datetime)
     return (_ensure_datetime(appointment_time) - now).total_seconds() >= 86400
 
 
+def is_within_operating_hours(
+    request_start: datetime,
+    request_end: datetime,
+) -> tuple[bool, str]:
+    """
+    Checks if a booking falls within clinic operating hours. (F-052)
+
+    Rules:
+    - Mon-Fri: 09:00-18:00
+    - Saturday: 09:00-13:00
+    - Sunday: closed
+    - Lunch break: 12:30-13:30 (no bookings)
+    """
+    weekday = request_start.weekday()  # 0=Mon ... 6=Sun
+
+    # Sunday — closed
+    if weekday == 6:
+        return False, "일요일은 휴진입니다."
+
+    start_t = request_start.time()
+    end_t = request_end.time()
+
+    # Saturday — 09:00~13:00 (no lunch break to check since close < lunch_end)
+    if weekday == 5:
+        if start_t < _SATURDAY_OPEN:
+            return False, "토요일 진료시간은 오전 9시부터입니다."
+        if end_t > _SATURDAY_CLOSE or (end_t == time(0, 0) and request_end.date() > request_start.date()):
+            return False, "토요일 진료시간은 오후 1시까지입니다."
+        return True, ""
+
+    # Weekday (Mon-Fri) — 09:00~18:00
+    if start_t < _WEEKDAY_OPEN:
+        return False, "진료시간은 오전 9시부터입니다."
+    if end_t > _WEEKDAY_CLOSE or (end_t == time(0, 0) and request_end.date() > request_start.date()):
+        return False, "진료시간은 오후 6시까지입니다."
+
+    # Lunch break overlap: booking [start, end) intersects [12:30, 13:30)
+    lunch_start = datetime.combine(request_start.date(), _LUNCH_START, tzinfo=request_start.tzinfo)
+    lunch_end = datetime.combine(request_start.date(), _LUNCH_END, tzinfo=request_start.tzinfo)
+    if max(request_start, lunch_start) < min(request_end, lunch_end):
+        return False, "점심시간(12:30~13:30)에는 예약이 불가합니다."
+
+    return True, ""
+
+
 def is_slot_available(
     request_time: datetime,
     duration: timedelta,
@@ -168,8 +221,8 @@ def is_slot_available(
     booking_id_to_ignore: str | None = None
 ) -> tuple[bool, str]:
     """
-    Checks for slot availability, considering overlaps and capacity.
-    (F-053, F-054)
+    Checks for slot availability, considering overlaps, capacity, and operating hours.
+    (F-052, F-053, F-054)
     """
     # Rule: Cannot book appointments in the past.
     if _ensure_datetime(request_time) < now:
@@ -177,6 +230,11 @@ def is_slot_available(
 
     request_start = _ensure_datetime(request_time)
     request_end = request_start + duration
+
+    # Rule: Operating hours check (F-052)
+    within_hours, hours_reason = is_within_operating_hours(request_start, request_end)
+    if not within_hours:
+        return False, hours_reason
 
     # Filter out the booking being modified
     relevant_bookings = [b for b in bookings if b.booking_id != booking_id_to_ignore]
@@ -207,15 +265,21 @@ def suggest_alternative_slots(
 ) -> list[datetime]:
     """
     Suggests 1-3 available alternative slots on the same day.
-    (F-056)
+    Respects operating hours including lunch break. (F-056)
     """
     suggestions = []
 
-    # Define clinic hours (e.g., 9 AM to 6 PM)
     orig_dt = _ensure_datetime(original_time)
     tz = orig_dt.tzinfo
-    day_start = datetime.combine(orig_dt.date(), time(9, 0), tzinfo=tz)
-    day_end = datetime.combine(orig_dt.date(), time(18, 0), tzinfo=tz)
+    weekday = orig_dt.weekday()
+
+    # Sunday — no alternatives
+    if weekday == 6:
+        return []
+
+    # Determine day_end based on weekday
+    close_time = _SATURDAY_CLOSE if weekday == 5 else _WEEKDAY_CLOSE
+    day_end = datetime.combine(orig_dt.date(), close_time, tzinfo=tz)
 
     # Start checking from the next 30-minute interval after the original failed time
     orig = _ensure_datetime(original_time)
