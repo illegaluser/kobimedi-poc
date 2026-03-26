@@ -1,0 +1,38 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/luuuuunatic/Developer/kobimedi-poc/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/luuuuunatic/Developer/kobimedi-poc
+configfile: pytest.ini
+plugins: anyio-4.12.1
+collecting ... collected 28 items
+
+tests/test_e2e.py::TestE2EHappyPath::test_1_1_batch_single_message_booking PASSED [  3%]
+tests/test_e2e.py::TestE2EHappyPath::test_1_2_chat_multiturn_flow PASSED [  7%]
+tests/test_e2e.py::TestE2EHappyPath::test_1_3_confirmation_yes PASSED    [ 10%]
+tests/test_e2e.py::TestE2EHappyPath::test_1_4_confirmation_no_resets PASSED [ 14%]
+tests/test_e2e.py::TestE2EIdentityProxy::test_2_1_self_booking_asks_contact PASSED [ 17%]
+tests/test_e2e.py::TestE2EIdentityProxy::test_2_2_proxy_booking_flow PASSED [ 21%]
+tests/test_e2e.py::TestE2ESafetyGate::test_5_1_medical_question_rejected PASSED [ 25%]
+tests/test_e2e.py::TestE2ESafetyGate::test_5_2_privacy_request_rejected PASSED [ 28%]
+tests/test_e2e.py::TestE2ESafetyGate::test_5_3_insurance_escalated PASSED [ 32%]
+tests/test_e2e.py::TestE2ESafetyGate::test_5_5_injection_rejected PASSED [ 35%]
+tests/test_e2e.py::TestE2ESafetyGate::test_5_6_off_topic_rejected PASSED [ 39%]
+tests/test_e2e.py::TestE2ESafetyGate::test_5_7_emergency_escalated PASSED [ 42%]
+tests/test_e2e.py::TestE2EDepartment::test_6_1_unsupported_department_rejected PASSED [ 46%]
+tests/test_e2e.py::TestE2EDepartment::test_6_2_symptom_guides_department PASSED [ 50%]
+tests/test_e2e.py::TestE2EOperatingHours::test_7_1_sunday_blocked PASSED [ 53%]
+tests/test_e2e.py::TestE2EOperatingHours::test_7_2_saturday_afternoon_blocked PASSED [ 57%]
+tests/test_e2e.py::TestE2EOperatingHours::test_7_3_lunch_break_blocked PASSED [ 60%]
+tests/test_e2e.py::TestE2EOperatingHours::test_7_4_before_9am_blocked PASSED [ 64%]
+tests/test_e2e.py::TestE2EOperatingHours::test_7_5_saturday_morning_ok PASSED [ 67%]
+tests/test_e2e.py::TestE2EOperatingHours::test_7_6_weekday_normal_hours_ok PASSED [ 71%]
+tests/test_e2e.py::TestE2EDialogueState::test_8_1_four_clarify_escalates PASSED [ 75%]
+tests/test_e2e.py::TestE2EDialogueState::test_8_2_slots_persist_across_turns PASSED [ 78%]
+tests/test_e2e.py::TestE2ECalcom::test_9_calcom_slot_query PASSED        [ 82%]
+tests/test_e2e.py::TestE2ECalcom::test_9_calcom_all_departments PASSED   [ 85%]
+tests/test_e2e.py::TestE2ECalcom::test_9_calcom_enabled_check PASSED     [ 89%]
+tests/test_e2e.py::TestE2ECalcom::test_9_batch_with_real_calcom PASSED   [ 92%]
+tests/test_e2e.py::TestE2ECalcom::test_9_chat_with_real_calcom PASSED    [ 96%]
+tests/test_e2e.py::TestE2EMixed::test_mixed_medical_and_booking PASSED   [100%]
+
+======================== 28 passed in 70.08s (0:01:10) =========================
