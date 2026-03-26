@@ -214,9 +214,11 @@ GitHub에서 clone한 후 `chat.py` 또는 `run.py`를 실행하기까지의 전
 | 항목 | 버전 | 용도 | 필수 여부 |
 |------|------|------|----------|
 | Python | 3.12 이상 | 에이전트 런타임 | 필수 |
-| Ollama | 0.4.0 이상 | 로컬 LLM 서빙 | 필수 |
+| Ollama | 0.4.0 이상 | 로컬 LLM 서빙 (챗봇의 자연어 이해 엔진) | 필수 |
 | Git | - | 저장소 clone | 필수 |
-| Cal.com 계정 | - | 외부 예약 시스템 연동 (Q4) | 선택 |
+| Cal.com 계정 | - | 외부 예약 시스템 연동 (Q4 선택과제) | 선택 |
+
+> **Ollama란?** 로컬 PC에서 LLM(대규모 언어 모델)을 실행할 수 있게 해주는 도구입니다. 이 프로젝트는 Ollama 위에서 `qwen3-coder:30b` 모델을 사용하여 사용자의 자연어 메시지를 이해하고 예약 의도를 분류합니다.
 
 ### Step 1: 저장소 clone
 
@@ -227,88 +229,122 @@ cd kobimedi-poc
 
 ### Step 2: Python 가상환경 생성 + 의존성 설치
 
+프로젝트 전용 가상환경을 만들어 시스템 Python과 격리합니다.
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` 내용:
+설치되는 패키지:
 
-```text
-ollama>=0.4.0
-pytest>=7.0.0
-freezegun>=1.2.0
-requests>=2.31.0
-python-dotenv>=1.0.0
-```
+| 패키지 | 용도 |
+|--------|------|
+| `ollama` | Ollama LLM 호출 클라이언트 |
+| `requests` | Cal.com API HTTP 통신 |
+| `python-dotenv` | `.env` 파일에서 환경변수 로드 |
+| `pytest` | 유닛 테스트 프레임워크 |
+| `freezegun` | 테스트 시 시간 고정 (예약 시간 테스트용) |
 
 ### Step 3: Ollama 설치 + LLM 모델 다운로드
 
-Ollama가 설치되어 있지 않다면:
+이 프로젝트의 챗봇은 클라우드 API가 아닌 **로컬 LLM**을 사용합니다. Ollama를 먼저 설치한 뒤 모델을 다운로드해야 합니다.
+
+**Ollama 설치:**
 
 ```bash
-# macOS
+# macOS (Homebrew)
 brew install ollama
 
 # Linux
 curl -fsSL https://ollama.com/install.sh | sh
+
+# Windows — https://ollama.com/download 에서 설치 파일 다운로드
 ```
 
-LLM 모델 다운로드 (약 18GB, 최초 1회):
+**Ollama 서비스 시작** (설치 후 처음 한 번, 또는 재부팅 후):
+
+```bash
+ollama serve
+# 별도 터미널에서 실행하거나, 백그라운드로 실행해 두세요.
+# macOS에서는 Ollama 앱을 실행하면 자동으로 서비스가 시작됩니다.
+```
+
+**LLM 모델 다운로드** (약 18GB, 최초 1회만 필요):
 
 ```bash
 ollama pull qwen3-coder:30b
 ```
 
-Ollama 서비스 구동 확인:
+**설치 확인:**
 
 ```bash
 ollama list
+# 아래와 같이 출력되면 정상입니다:
 # NAME                ID              SIZE
 # qwen3-coder:30b     06c1097efce0    18 GB
 ```
 
 ### Step 4: 환경변수 설정 (.env)
 
-Cal.com 연동(Q4)을 사용하려면 `.env` 파일을 프로젝트 루트에 생성합니다. Cal.com 연동이 불필요하면 이 단계를 건너뛰어도 됩니다. Graceful Degradation으로 로컬 정책만으로도 정상 동작합니다.
+Cal.com 연동(Q4 선택과제)을 사용하려면 `.env` 파일을 프로젝트 루트에 생성합니다.
+
+> **Cal.com 연동 없이도 챗봇은 정상 동작합니다.** `.env` 파일이 없으면 로컬 정책 엔진만으로 예약을 처리합니다 (Graceful Degradation). Cal.com은 외부 캘린더와의 연동이 필요한 경우에만 설정하세요.
 
 ```bash
-# .env (프로젝트 루트)
+# .env 파일을 프로젝트 루트(kobimedi-poc/)에 생성
 CALCOM_API_KEY=cal_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# cal.com 분과별 Event Type ID
+# cal.com 분과별 Event Type ID (cal.com 대시보드 > Event Types에서 확인)
 CALCOM_ENT_ID=1234567        # 이비인후과
 CALCOM_INTERNAL_ID=1234568   # 내과
 CALCOM_ORTHO_ID=1234569      # 정형외과
 ```
 
-Cal.com Event Type ID는 cal.com 대시보드 > Event Types에서 확인할 수 있습니다.
-
 ### Step 5: 설치 확인
 
+모든 설치가 완료되었는지 자동으로 점검하는 스크립트를 실행합니다.
+
 ```bash
-# 자동 환경 점검 (가상환경, 의존성, Ollama 모델 상태 확인)
 ./scripts/init.sh
 ```
 
-또는 수동 확인:
+이 스크립트는 다음을 확인합니다:
+- Python 가상환경 존재 여부
+- `requirements.txt` 의존성 설치 상태
+- Ollama 설치 여부 및 `qwen3-coder:30b` 모델 로드 상태
+
+수동으로 확인하려면:
 
 ```bash
-python --version       # 3.12 이상
-ollama list            # qwen3-coder:30b 확인
-pytest tests/ -v       # 226 passed
+python --version       # Python 3.12 이상 출력 확인
+ollama list            # qwen3-coder:30b가 목록에 있는지 확인
+pytest tests/ -v       # "226 passed"가 출력되면 환경 정상
 ```
 
 ### Step 6: 실행
 
-```bash
-# 모드 1: 인터랙티브 챗봇
-python chat.py
+**인터랙티브 챗봇** — 터미널에서 직접 메시지를 입력하며 대화합니다:
 
-# 모드 2: 배치 처리
+```bash
+python chat.py
+```
+
+실행하면 아래와 같은 프롬프트가 나타나고, 자유롭게 예약 관련 메시지를 입력할 수 있습니다:
+
+```
+🏥 코비메디 예약 챗봇입니다. 무엇을 도와드릴까요?
+> (여기에 메시지 입력)
+```
+
+**배치 처리** — CS 티켓 50건을 한 번에 처리하여 JSON 결과를 생성합니다:
+
+```bash
 python run.py --input data/tickets.json --output results.json
 ```
+
+실행이 완료되면 `results.json` 파일에 각 티켓별 의도 분류, 응답, confidence, reasoning이 담깁니다.
 
 ### 빠른 시작 (한 줄 요약)
 
@@ -322,75 +358,135 @@ git clone <repo> && cd kobimedi-poc && ./scripts/init.sh && python chat.py
 
 | 증상 | 원인 | 해결 |
 |------|------|------|
-| `ModuleNotFoundError: No module named 'ollama'` | 의존성 미설치 | `pip install -r requirements.txt` |
-| `ollama._types.ResponseError` | Ollama 서비스 미구동 | `ollama serve` 실행 후 재시도 |
-| `model "qwen3-coder:30b" not found` | 모델 미다운로드 | `ollama pull qwen3-coder:30b` |
-| Cal.com 관련 clarify 응답 | `.env` 미설정 | `.env` 파일 생성 또는 무시 (로컬만으로 동작) |
-| `pytest` 시 226개 미만 통과 | 환경 문제 | `pip install -r requirements.txt` 재실행 |
+| `ModuleNotFoundError: No module named 'ollama'` | Python 의존성이 설치되지 않음 | `pip install -r requirements.txt` 실행 |
+| `ollama._types.ResponseError` | Ollama 서비스가 구동되지 않음 | 별도 터미널에서 `ollama serve` 실행 후 재시도 |
+| `model "qwen3-coder:30b" not found` | LLM 모델이 다운로드되지 않음 | `ollama pull qwen3-coder:30b` 실행 (18GB 다운로드) |
+| Cal.com 관련 clarify 응답이 반복됨 | `.env` 파일이 없거나 API 키가 틀림 | `.env` 파일을 확인하거나, Cal.com 없이도 동작하므로 무시 가능 |
+| `pytest` 실행 시 226개 미만 통과 | 의존성 버전 불일치 | 가상환경 재생성: `rm -rf .venv && python3 -m venv .venv && pip install -r requirements.txt` |
+| `chat.py` 실행 시 첫 응답이 느림 (10~30초) | Ollama가 모델을 메모리에 로드하는 중 | 정상 동작입니다. 첫 응답 이후에는 빨라집니다 |
 
 ---
 
 ## 5. 테스트
 
-### 테스트 체계
+이 프로젝트는 **유닛 테스트**와 **시나리오 테스트** 두 가지 레벨로 품질을 검증합니다.
 
-| 레벨 | 수량 | 실행 | 속도 |
-|------|------|------|------|
-| **유닛 테스트** | 226개 | `pytest tests/` | ~9초 |
-| **시나리오 테스트** | 51개 | `python scripts/run_scenario_tests.py` | ~80초 |
+### 유닛 테스트 (226개)
 
-유닛 테스트는 Mock 기반으로 각 컴포넌트를 격리 검증한다. 시나리오 테스트는 실제 Ollama + Cal.com을 호출하여 대화 흐름 전체를 검증한다.
-
-### 유닛 테스트 파일
-
-| 파일 | 수량 | 대상 |
-|------|------|------|
-| `test_scenarios.py` | 51 | 9개 카테고리 시나리오 |
-| `test_calcom.py` | 51 | Cal.com API 연동 |
-| `test_safety.py` | 35 | Safety gate |
-| `test_response_builder.py` | 27 | 응답 생성 |
-| `test_classifier.py` | 20 | 의도 분류 |
-| `test_policy.py` | 14 | 정책 엔진 |
-| `test_dialogue.py` | 13 | 멀티턴 대화 |
-| `test_storage.py` | 11 | 저장소 |
-| `test_generalization.py` | 3 | 일반화 |
-| `test_batch.py` | 1 | 배치 출력 |
-
-### 시나리오 9개 카테고리
-
-| # | 카테고리 | 수량 | LLM |
-|---|---------|------|-----|
-| 1 | 정상 예약 완료 | 4 | O |
-| 2 | 환자 식별 & 대리 | 4 | O |
-| 3 | 정책 엔진 슬롯 계산 | 5 | X |
-| 4 | 24시간 변경/취소 | 5 | X |
-| 5 | Safety Gate | 7 | O |
-| 6 | 분과/운영시간 | 3 | O |
-| 7 | 운영시간 정책 (F-052) | 12 | X |
-| 8 | 대화 상태 관리 | 3 | O |
-| 9 | Cal.com 외부 연동 | 8 | O |
-
-상세 명세: [docs/test_scenarios.md](docs/test_scenarios.md)
-
-### 실행 스크립트
+외부 의존성(LLM, Cal.com)을 Mock으로 대체하여 각 컴포넌트를 격리 검증합니다. Ollama나 네트워크 없이도 실행 가능하며, **코드 수정 후 빠르게 회귀를 잡는 용도**입니다.
 
 ```bash
-./scripts/run_tests.sh              # 유닛만
-./scripts/run_tests.sh --scenario   # 시나리오만
-./scripts/run_tests.sh --all        # 전체
+pytest tests/ -v    # 약 9초, 226 passed
 ```
+
+| 파일 | 수량 | 검증 대상 |
+|------|------|----------|
+| `test_scenarios.py` | 51 | 9개 카테고리 시나리오 (예약, 환자 식별, 정책, 안전, Cal.com 등) |
+| `test_calcom.py` | 51 | Cal.com API 연동 (슬롯 조회, 예약 생성, 취소, Race Condition, 장애 복구) |
+| `test_safety.py` | 35 | Safety gate (의료 상담 차단, 인젝션 방어, 증상 안내, 혼합 요청 분리) |
+| `test_response_builder.py` | 27 | 응답 메시지 생성 (본인/대리 질문, 이름/연락처 수집, 분과/시간 안내) |
+| `test_classifier.py` | 20 | 의도 분류 (LLM 파싱, 에러 복구, 의사→분과 매핑, 증상→분과 매핑) |
+| `test_policy.py` | 14 | 정책 엔진 (슬롯 겹침, 정원 3명, 24시간 룰, 대안 슬롯, 초진/재진 시간) |
+| `test_dialogue.py` | 13 | 멀티턴 대화 (proxy 수집, 상태 유지, 4회 clarify 에스컬레이션) |
+| `test_storage.py` | 11 | 저장소 (영속화, 중복 방지, 취소, 초진/재진 판정, 파일 손상 복구) |
+| `test_generalization.py` | 3 | 일반화 (한국어 인젝션, 혼합 요청, 모호한 환자 유형) |
+| `test_batch.py` | 1 | 배치 모드 (run.py 출력 JSON 스키마 + KPI 메트릭) |
+
+### 시나리오 테스트 (51개)
+
+실제 Ollama LLM과 Cal.com API를 호출하여 **사용자 발화 → 챗봇 응답 → 상태 전이**의 대화 흐름 전체를 검증합니다. LLM 모델 변경이나 프롬프트 수정 후 **실제 동작 품질을 확인하는 용도**입니다.
+
+```bash
+python scripts/run_scenario_tests.py    # 약 80초, 51개 시나리오
+
+# 특정 카테고리만 실행
+python scripts/run_scenario_tests.py --category 5    # Safety Gate만
+
+# LLM 없이 정책 엔진만 테스트 (카테고리 3, 4, 7)
+python scripts/run_scenario_tests.py --policy-only
+```
+
+| # | 카테고리 | 수량 | 실제 LLM 필요 | 검증 내용 |
+|---|---------|------|:---:|----------|
+| 1 | 정상 예약 완료 | 4 | O | 배치/채팅 예약 성공, 확인 Yes/No 처리 |
+| 2 | 환자 식별 & 대리 | 4 | O | 본인/대리 구분, 연락처 수집, 동명이인 |
+| 3 | 정책 엔진 슬롯 계산 | 5 | X | 겹침 감지, 정원 초과, 과거 시간, 대안 슬롯 |
+| 4 | 24시간 변경/취소 | 5 | X | 경계값 (23h30m 거절, 24h10m 허용, 정확히 24h) |
+| 5 | Safety Gate | 7 | O | 의료 질문, 인젝션, 잡담, 응급, 혼합 요청 |
+| 6 | 분과/운영시간 | 3 | O | 미지원 진료과, 증상→분과 안내, 미등록 의사 |
+| 7 | 운영시간 정책 | 12 | X | 점심시간, 토요일, 일요일, 09시 전, 18시 후 |
+| 8 | 대화 상태 관리 | 3 | O | 4회 clarify 에스컬레이션, 누적 슬롯 유지 |
+| 9 | Cal.com 외부 연동 | 8 | O | 서버 장애, Race Condition, Graceful Degradation |
+
+상세 시나리오 명세: [docs/test_scenarios.md](docs/test_scenarios.md)
+
+### 통합 실행
+
+`scripts/run_tests.sh`를 사용하면 유닛 테스트와 시나리오 테스트를 한 번에 실행하고 결과 파일을 자동 생성합니다.
+
+```bash
+./scripts/run_tests.sh              # 유닛 테스트만 실행 (기본, ~9초)
+./scripts/run_tests.sh --scenario   # 시나리오 테스트만 실행 (~80초)
+./scripts/run_tests.sh --all        # 유닛 + 시나리오 전체 실행
+```
+
+결과 파일은 `docs/test_results_unit.txt`와 `docs/test_results_scenario.txt`에 저장됩니다.
 
 ---
 
 ## 6. 스크립트
 
-| 스크립트 | 용도 | 사용법 |
-|---------|------|-------|
-| `scripts/init.sh` | 환경 초기화 (venv + 의존성 + Ollama 확인) | `./scripts/init.sh` |
-| `scripts/check.sh` | 전체 검증 (구문 + 테스트 + 배치 + Gold eval) | `./scripts/check.sh` |
-| `scripts/run_tests.sh` | 유닛/시나리오 테스트 실행 + 결과 파일 생성 | `./scripts/run_tests.sh --all` |
-| `scripts/run_scenario_tests.py` | 시나리오 러너 (카테고리별, 정책만 등) | `python scripts/run_scenario_tests.py --category 5` |
-| `scripts/cleanup_bookings.py` | Cal.com 예약 일괄 삭제 + 로컬 동기화 | `python scripts/cleanup_bookings.py --dry-run` |
+프로젝트 운영에 필요한 스크립트들입니다.
+
+### `scripts/init.sh` — 환경 초기화
+
+프로젝트를 처음 세팅할 때 실행합니다. 가상환경 생성, 의존성 설치, Ollama 모델 상태를 자동으로 확인합니다.
+
+```bash
+./scripts/init.sh
+```
+
+### `scripts/check.sh` — 전체 검증
+
+구문 검사, Feature 통과율, 유닛 테스트, 배치 처리 실행, Gold 평가를 한 번에 수행합니다. 코드 수정 후 전체적인 상태를 빠르게 점검할 때 사용합니다.
+
+```bash
+./scripts/check.sh
+```
+
+### `scripts/run_tests.sh` — 테스트 실행기
+
+유닛 테스트와 시나리오 테스트를 선택적으로 실행하고, 결과를 `docs/` 디렉토리에 파일로 저장합니다.
+
+```bash
+./scripts/run_tests.sh              # 유닛만 (기본)
+./scripts/run_tests.sh --scenario   # 시나리오만
+./scripts/run_tests.sh --all        # 전체
+```
+
+### `scripts/run_scenario_tests.py` — 시나리오 테스트 러너
+
+51개 시나리오를 실제 LLM으로 실행하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력합니다. 비개발자에게 동작을 데모하거나, LLM 모델 변경 후 품질을 검수할 때 유용합니다.
+
+```bash
+python scripts/run_scenario_tests.py                    # 전체 9개 카테고리
+python scripts/run_scenario_tests.py --category 1       # 특정 카테고리만
+python scripts/run_scenario_tests.py --policy-only      # 정책 엔진만 (LLM 불필요)
+python scripts/run_scenario_tests.py --output result.txt # 결과를 파일에 저장
+```
+
+### `scripts/cleanup_bookings.py` — Cal.com 예약 일괄 삭제 + 로컬 동기화
+
+테스트 과정에서 Cal.com에 생성된 원격 예약과 로컬 `data/bookings.json`을 한 번에 정리합니다. 테스트 후 깨끗한 상태로 되돌릴 때 사용합니다.
+
+```bash
+python scripts/cleanup_bookings.py --dry-run    # 삭제 대상만 확인 (실제 삭제 안 함)
+python scripts/cleanup_bookings.py              # 전체 삭제 (확인 프롬프트)
+python scripts/cleanup_bookings.py --force      # 확인 없이 즉시 삭제
+python scripts/cleanup_bookings.py --local-only # 로컬 bookings.json만 초기화
+```
+
+
 
 ---
 
