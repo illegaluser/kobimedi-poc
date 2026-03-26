@@ -1,10 +1,11 @@
 # 코비메디 예약 챗봇 — 시나리오 테스트 명세서
 
 > **유닛 테스트:** `tests/test_scenarios.py` (61개, Mock 기반)
-> **시나리오 테스트:** `scripts/run_scenario_tests.py` (61개, 실제 Ollama + Cal.com)
+> **시나리오 테스트:** `scripts/run_scenario_tests.py` (10개 카테고리, 실제 Ollama + Cal.com)
+> **생명주기 테스트:** `scripts/test_booking_lifecycle.py` (예약→변경→취소, Category 10에서 호출)
 >
-> 동일한 61개 시나리오를 두 가지 방식으로 검증한다.
-> 유닛 테스트는 Mock으로 컴포넌트를 격리하고, 시나리오 테스트는 실제 LLM을 거쳐 대화 흐름 전체를 확인한다.
+> 유닛 테스트는 Mock으로 컴포넌트를 격리하고, 시나리오 테스트는 실제 LLM + Cal.com을 거쳐 대화 흐름 전체를 확인한다.
+> Category 10은 `test_booking_lifecycle.py`를 호출하여 1명의 환자의 예약 생명주기 전체를 검증한다.
 
 ---
 

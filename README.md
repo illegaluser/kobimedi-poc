@@ -263,7 +263,7 @@ python-dotenv>=1.0.0
 | `ollama` | 0.4.0+ | Ollama LLM 호출 클라이언트. `classifier.py`가 이 패키지를 통해 로컬 LLM에 의도 분류를 요청합니다. |
 | `requests` | 2.31.0+ | Cal.com API HTTP 통신. `calcom_client.py`가 슬롯 조회/예약 생성 시 사용합니다. |
 | `python-dotenv` | 1.0.0+ | `.env` 파일의 환경변수(Cal.com API 키 등)를 자동으로 로드합니다. |
-| `pytest` | 7.0.0+ | 유닛 테스트 프레임워크. 226개 유닛 테스트를 실행합니다. |
+| `pytest` | 7.0.0+ | 유닛 테스트 프레임워크. 236개 유닛 테스트를 실행합니다. |
 | `freezegun` | 1.2.0+ | 테스트 시 시스템 시간을 고정하여 24시간 룰, 운영시간 등 시간 의존 정책을 결정론적으로 검증합니다. |
 
 ### Step 3: Ollama 설치 + LLM 모델 다운로드
@@ -356,7 +356,7 @@ CALCOM_ORTHO_ID=1234569      # 정형외과
 ```bash
 python --version       # Python 3.12 이상 출력 확인
 ollama list            # qwen3-coder:30b가 목록에 있는지 확인
-pytest tests/ -v       # "226 passed"가 출력되면 환경 정상
+pytest tests/ -v       # "236 passed"가 출력되면 환경 정상
 ```
 
 ### Step 6: 실행
@@ -398,7 +398,7 @@ git clone <repo> && cd kobimedi-poc && ./scripts/init.sh && python chat.py
 | `ollama._types.ResponseError` | Ollama 서비스가 구동되지 않음 | 별도 터미널에서 `ollama serve` 실행 후 재시도 |
 | `model "qwen3-coder:30b" not found` | LLM 모델이 다운로드되지 않음 | `ollama pull qwen3-coder:30b` 실행 (18GB 다운로드) |
 | Cal.com 관련 clarify 응답이 반복됨 | `.env` 파일이 없거나 API 키가 틀림 | `.env` 파일을 확인하거나, Cal.com 없이도 동작하므로 무시 가능 |
-| `pytest` 실행 시 226개 미만 통과 | 의존성 버전 불일치 | 가상환경 재생성: `rm -rf .venv && python3 -m venv .venv && pip install -r requirements.txt` |
+| `pytest` 실행 시 236개 미만 통과 | 의존성 버전 불일치 | 가상환경 재생성: `rm -rf .venv && python3 -m venv .venv && pip install -r requirements.txt` |
 | `chat.py` 실행 시 첫 응답이 느림 (10~30초) | Ollama가 모델을 메모리에 로드하는 중 | 정상 동작입니다. 첫 응답 이후에는 빨라집니다 |
 
 ---
@@ -503,10 +503,22 @@ python scripts/run_scenario_tests.py --policy-only
 [docs/test_scenarios.md](docs/test_scenarios.md)에 정의된 61개 시나리오를 실제 LLM으로 실행하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력합니다. 비개발자에게 동작을 데모하거나, LLM 모델 변경 후 품질을 검수할 때 유용합니다.
 
 ```bash
-python scripts/run_scenario_tests.py                    # 전체 9개 카테고리
+python scripts/run_scenario_tests.py                    # 전체 10개 카테고리
 python scripts/run_scenario_tests.py --category 1       # 특정 카테고리만
+python scripts/run_scenario_tests.py --category 10      # 예약→변경→취소 플로우
 python scripts/run_scenario_tests.py --policy-only      # 정책 엔진만 (LLM 불필요)
 python scripts/run_scenario_tests.py --output result.txt # 결과를 파일에 저장
+```
+
+### `scripts/test_booking_lifecycle.py` — 예약 생명주기 통합 테스트
+
+1명의 환자가 진료예약 → 예약변경 → 예약취소를 순서대로 수행하는 전체 플로우를 실제 Ollama + Cal.com으로 검증합니다. `run_scenario_tests.py --category 10`에서도 이 스크립트를 호출합니다.
+
+```bash
+python scripts/test_booking_lifecycle.py                                   # 기본 (8일 후 평일, 오전 10시)
+python scripts/test_booking_lifecycle.py --date 4월15일 --time "오후 3시"    # 날짜/시간 지정
+python scripts/test_booking_lifecycle.py --new-time "오후 4시"              # 변경 목표 시간 지정
+python scripts/test_booking_lifecycle.py --dept 이비인후과                   # 분과 지정
 ```
 
 ### `scripts/cleanup_bookings.py` — Cal.com 예약 일괄 삭제 + 로컬 동기화
@@ -541,7 +553,7 @@ kobimedi-poc/
 │   ├── models.py                # 데이터 모델
 │   └── metrics.py               # KPI 기록
 ├── scripts/                     # 운영 스크립트
-├── tests/                       # 유닛 테스트 (226개)
+├── tests/                       # 유닛 테스트 (236개)
 ├── data/
 │   ├── tickets.json             # 입력 티켓 (과제 샘플 50건, 추가 가능)
 │   └── bookings.json            # 예약 저장소 (진실원천)

@@ -45,11 +45,11 @@ python chat.py
 
 ## 시나리오 테스트 결과
 
-시나리오 테스트 러너로 51개 시나리오를 실제 LLM으로 검증한 결과:
+시나리오 테스트 러너로 10개 카테고리 시나리오를 실제 LLM + Cal.com으로 검증한 결과:
 
 ```bash
 python scripts/run_scenario_tests.py
-# PASS: 51/51  FAIL: 0/51  SKIP: 0/51
+# Category 1~9: 기존 51개 시나리오 + Category 10: 예약→변경→취소 생명주기
 ```
 
 상세 결과: [docs/test_results_scenario.txt](test_results_scenario.txt)

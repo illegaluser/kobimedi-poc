@@ -4,7 +4,7 @@
 #
 # 사용법:
 #   ./scripts/run_tests.sh              # 유닛 테스트만 (기본)
-#   ./scripts/run_tests.sh --scenario   # 시나리오 테스트만 (9개 카테고리)
+#   ./scripts/run_tests.sh --scenario   # 시나리오 테스트만 (10개 카테고리)
 #   ./scripts/run_tests.sh --all        # 유닛 + 시나리오 전체
 #
 # 결과 파일:
@@ -68,11 +68,11 @@ run_unit_tests() {
 }
 
 # ---------------------------------------------------------------
-# 시나리오 테스트 (9개 카테고리, 실제 LLM + Cal.com)
+# 시나리오 테스트 (10개 카테고리, 실제 LLM + Cal.com)
 # ---------------------------------------------------------------
 run_scenario_tests() {
     echo ""
-    echo "== Scenario Tests (9 categories, 51 scenarios) =="
+    echo "== Scenario Tests (10 categories) =="
 
     if python scripts/run_scenario_tests.py --output "$SCENARIO_RESULT" 2>&1; then
         echo -e "\n${GREEN}[PASS]${NC} Scenario tests completed"
