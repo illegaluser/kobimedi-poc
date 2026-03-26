@@ -38,11 +38,11 @@
 
 | 요구사항 | 구현 | 검증 |
 |---------|------|------|
-| 7개 Action 분류 (book/modify/cancel/check/clarify/escalate/reject) | `src/classifier.py` + `src/agent.py` | 시나리오 전 카테고리 |
+| 7개 Action 분류 (book/modify/cancel/check/clarify/escalate/reject) | `src/classifier.py` + `src/agent.py` | [전체 9개 카테고리 51개 시나리오](docs/test_scenarios.md) |
 | 두 모드가 동일한 Agent 로직 공유 | `chat.py`, `run.py` 모두 `src/agent.py`의 `process_ticket()` 호출 | `test_dialogue.py::test_F048` |
-| 진료 예약 정책 위반 판단 | `src/policy.py` (결정론, LLM 위임 금지) | 시나리오 Cat 3, 4, 7 |
-| 의료 상담 / 목적 외 사용 거부 | `src/classifier.py` Safety Gate (규칙 기반 + LLM 폴백) | 시나리오 Cat 5 |
-| 모호한 요청에 clarification | `src/agent.py` pending_missing_info 큐 | 시나리오 Cat 1, 8 |
+| 진료 예약 정책 위반 판단 | `src/policy.py` (결정론, LLM 위임 금지) | [3. 정책엔진](docs/test_scenarios.md#3-정책-엔진-슬롯-계산-deterministic-policy)(3-1~3-5), [4. 24시간룰](docs/test_scenarios.md#4-24시간-변경취소-규칙-modification--cancellation)(4-1~4-5), [7. 운영시간](docs/test_scenarios.md#7-운영시간-정책-operating-hours-f-052)(7-1~7-12) |
+| 의료 상담 / 목적 외 사용 거부 | `src/classifier.py` Safety Gate (규칙 기반 + LLM 폴백) | [5. Safety Gate](docs/test_scenarios.md#5-safety-gate-safety--clarification)(5-1~5-7) |
+| 모호한 요청에 clarification | `src/agent.py` pending_missing_info 큐 | [1. Happy Path](docs/test_scenarios.md#1-정상-예약-완료-happy-path)(1-2~1-4), [8. 대화상태](docs/test_scenarios.md#8-대화-상태-관리-dialogue-state-machine)(8-1~8-3) |
 | 배치 출력 JSON 스키마 (ticket_id, classified_intent, department, action, response, confidence, reasoning) | `src/agent.py` `_build_response_and_record()` | `test_batch.py` |
 | Hidden Test 일반화 대비 | tickets.json 50건 과적합 방지 — 정책 기반 결정론 설계 | `test_generalization.py` |
 
@@ -50,22 +50,22 @@
 
 | 정책 | 구현 | 테스트 시나리오 |
 |------|------|---------------|
-| 예약에 분과 + 날짜 + 시간 필수 | `agent.py` missing_info 큐 | 1-2, 8-2 |
-| 1시간당 최대 3명 | `policy.py` `is_slot_available()` | 3-2, 3-3 |
-| 초진 40분 / 재진 30분 | `policy.py` `get_appointment_duration()` | 3-1 |
-| 평일 09:00-18:00 | `policy.py` `is_within_operating_hours()` | 7-7, 7-8, 7-9 |
-| 토요일 09:00-13:00 | 동일 | 7-5, 7-6 |
-| 일요일 휴진 | 동일 | 7-4 |
-| 점심 12:30-13:30 불가 | 동일 | 7-1, 7-2, 7-3 |
-| 변경/취소 24시간 전까지 | `policy.py` `is_change_or_cancel_allowed()` | 4-1 ~ 4-4 |
-| 대리 예약 시 환자 이름 + 연락처 확인 | `agent.py` proxy 식별 흐름 | 2-1 ~ 2-4 |
-| 증상 → 분과 안내 (진단 아닌 안내) | `classifier.py` department_hint | 6-2 |
-| 의료 상담 절대 금지 | `classifier.py` Safety Gate | 5-1 |
-| 프롬프트 인젝션 거부 | `classifier.py` INJECTION_PATTERNS | 5-5 |
-| 개인정보 보호 | `classifier.py` PRIVACY_REQUEST_PATTERNS | 5-2 |
-| 에스컬레이션 (응급/불만/보험/의사 연락처) | `classifier.py` EMERGENCY/COMPLAINT/OPERATIONAL 패턴 | 5-3, 5-7 |
-| 슬롯 만석 시 대안 시간 안내 | `policy.py` `suggest_alternative_slots()` | 3-3 |
-| 허위 정보 금지 (거짓 성공 방지) | Cal.com 실패 시 로컬 저장 차단 | 9-2, 9-8 |
+| 예약에 분과 + 날짜 + 시간 필수 | `agent.py` missing_info 큐 | [1. Happy Path](docs/test_scenarios.md#1-정상-예약-완료-happy-path) 1-2, [8. 대화상태](docs/test_scenarios.md#8-대화-상태-관리-dialogue-state-machine) 8-2 |
+| 1시간당 최대 3명 | `policy.py` `is_slot_available()` | [3. 정책엔진](docs/test_scenarios.md#3-정책-엔진-슬롯-계산-deterministic-policy) 3-2, 3-3 |
+| 초진 40분 / 재진 30분 | `policy.py` `get_appointment_duration()` | [3. 정책엔진](docs/test_scenarios.md#3-정책-엔진-슬롯-계산-deterministic-policy) 3-1 |
+| 평일 09:00-18:00 | `policy.py` `is_within_operating_hours()` | [7. 운영시간](docs/test_scenarios.md#7-운영시간-정책-operating-hours-f-052) 7-7~7-9 |
+| 토요일 09:00-13:00 | 동일 | [7. 운영시간](docs/test_scenarios.md#7-운영시간-정책-operating-hours-f-052) 7-5, 7-6 |
+| 일요일 휴진 | 동일 | [7. 운영시간](docs/test_scenarios.md#7-운영시간-정책-operating-hours-f-052) 7-4 |
+| 점심 12:30-13:30 불가 | 동일 | [7. 운영시간](docs/test_scenarios.md#7-운영시간-정책-operating-hours-f-052) 7-1~7-3 |
+| 변경/취소 24시간 전까지 | `policy.py` `is_change_or_cancel_allowed()` | [4. 24시간룰](docs/test_scenarios.md#4-24시간-변경취소-규칙-modification--cancellation) 4-1~4-4 |
+| 대리 예약 시 환자 이름 + 연락처 확인 | `agent.py` proxy 식별 흐름 | [2. 환자식별](docs/test_scenarios.md#2-환자-식별--대리-예약-identity--proxy) 2-1~2-4 |
+| 증상 → 분과 안내 (진단 아닌 안내) | `classifier.py` department_hint | [6. 분과](docs/test_scenarios.md#6-분과-및-운영시간-department--hours) 6-2 |
+| 의료 상담 절대 금지 | `classifier.py` Safety Gate | [5. Safety](docs/test_scenarios.md#5-safety-gate-safety--clarification) 5-1 |
+| 프롬프트 인젝션 거부 | `classifier.py` INJECTION_PATTERNS | [5. Safety](docs/test_scenarios.md#5-safety-gate-safety--clarification) 5-5 |
+| 개인정보 보호 | `classifier.py` PRIVACY_REQUEST_PATTERNS | [5. Safety](docs/test_scenarios.md#5-safety-gate-safety--clarification) 5-2 |
+| 에스컬레이션 (응급/불만/보험/의사 연락처) | `classifier.py` 패턴 매칭 | [5. Safety](docs/test_scenarios.md#5-safety-gate-safety--clarification) 5-3, 5-7 |
+| 슬롯 만석 시 대안 시간 안내 | `policy.py` `suggest_alternative_slots()` | [3. 정책엔진](docs/test_scenarios.md#3-정책-엔진-슬롯-계산-deterministic-policy) 3-3 |
+| 허위 정보 금지 (거짓 성공 방지) | Cal.com 실패 시 로컬 저장 차단 | [9. Cal.com](docs/test_scenarios.md#9-q4-calcom-외부-연동--장애-복구-external-integration) 9-2, 9-8 |
 
 ### Q4: cal.com 연동
 
