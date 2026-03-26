@@ -1,5 +1,5 @@
 """
-tests/test_scenarios.py — 35개 E2E 시나리오 테스트
+tests/test_scenarios.py — 51개 E2E 시나리오 테스트
 
 Category 1: 정상 예약 완료 (Happy Path)                    1-1 ~ 1-4
 Category 2: 환자 식별 & 대리 예약 (Identity & Proxy)       2-1 ~ 2-4
@@ -7,8 +7,9 @@ Category 3: 정책 엔진 슬롯 계산 (Deterministic Policy)     3-1 ~ 3-5
 Category 4: 24시간 변경/취소 규칙 (Modification/Cancel)     4-1 ~ 4-5
 Category 5: Safety Gate (Safety & Clarification)           5-1 ~ 5-7
 Category 6: 분과 및 운영시간 (Department & Hours)           6-1 ~ 6-3
-Category 7: 대화 상태 관리 (Dialogue State Machine)         7-1 ~ 7-3
-Category 8: Q4 Cal.com 외부 연동 (External Integration)    8-1 ~ 8-8
+Category 7: 운영시간 정책 (Operating Hours, F-052)         7-1 ~ 7-12
+Category 8: 대화 상태 관리 (Dialogue State Machine)         8-1 ~ 8-3
+Category 9: Q4 Cal.com 외부 연동 (External Integration)    9-1 ~ 9-8
 """
 from __future__ import annotations
 
@@ -855,14 +856,14 @@ class TestDepartmentHours:
 
 
 # ─────────────────────────────────────────────────────────────
-# Category 6b: 운영시간 정책 검증 (F-052)
+# Category 7: 운영시간 정책 검증 (Operating Hours, F-052)
 # ─────────────────────────────────────────────────────────────
 
 class TestOperatingHours:
     """점심시간, 토요일, 일요일, 진료시간 외 예약 차단을 검증한다."""
 
     @freeze_time(NOW_POLICY)
-    def test_lunch_break_blocked(self):
+    def test_7_1_lunch_break_blocked(self):
         """점심시간(12:30-13:30) 예약 차단 — 재진(30분) 12:10 시작 → 12:40 종료, 점심 겹침."""
         ticket = Ticket(
             intent="book_appointment",
@@ -878,7 +879,7 @@ class TestOperatingHours:
             assert slot.hour >= 13 and slot.minute >= 30 or slot.hour >= 14
 
     @freeze_time(NOW_POLICY)
-    def test_lunch_break_boundary_before_ok(self):
+    def test_7_2_lunch_break_boundary_before_ok(self):
         """점심시간 직전 예약 — 재진(30분) 12:00 시작 → 12:30 종료, 점심과 안 겹침."""
         ticket = Ticket(
             intent="book_appointment",
@@ -890,7 +891,7 @@ class TestOperatingHours:
         assert result.action == Action.BOOK_APPOINTMENT
 
     @freeze_time(NOW_POLICY)
-    def test_lunch_break_boundary_after_ok(self):
+    def test_7_3_lunch_break_boundary_after_ok(self):
         """점심시간 직후 예약 — 재진(30분) 13:30 시작 → 14:00 종료, 점심과 안 겹침."""
         ticket = Ticket(
             intent="book_appointment",
@@ -902,7 +903,7 @@ class TestOperatingHours:
         assert result.action == Action.BOOK_APPOINTMENT
 
     @freeze_time(NOW_POLICY)
-    def test_sunday_blocked(self):
+    def test_7_4_sunday_blocked(self):
         """일요일 예약 시도 → 휴진 차단."""
         # 2026-03-29 is Sunday
         ticket = Ticket(
@@ -917,7 +918,7 @@ class TestOperatingHours:
         assert result.suggested_slots == []
 
     @freeze_time(NOW_POLICY)
-    def test_saturday_within_hours_ok(self):
+    def test_7_5_saturday_within_hours_ok(self):
         """토요일 09:00-13:00 내 예약 → 정상 통과."""
         # 2026-03-28 is Saturday
         ticket = Ticket(
@@ -930,7 +931,7 @@ class TestOperatingHours:
         assert result.action == Action.BOOK_APPOINTMENT
 
     @freeze_time(NOW_POLICY)
-    def test_saturday_after_1pm_blocked(self):
+    def test_7_6_saturday_after_1pm_blocked(self):
         """토요일 오후 1시 이후 예약 → 차단."""
         # 2026-03-28 is Saturday, 13:00 시작 → 13:30 종료 (>13:00)
         ticket = Ticket(
@@ -944,7 +945,7 @@ class TestOperatingHours:
         assert "토요일" in result.message
 
     @freeze_time(NOW_POLICY)
-    def test_before_9am_blocked(self):
+    def test_7_7_before_9am_blocked(self):
         """오전 9시 전 예약 → 차단."""
         ticket = Ticket(
             intent="book_appointment",
@@ -957,7 +958,7 @@ class TestOperatingHours:
         assert "9시" in result.message
 
     @freeze_time(NOW_POLICY)
-    def test_after_6pm_blocked(self):
+    def test_7_8_after_6pm_blocked(self):
         """오후 6시 이후 예약 → 차단 (재진 30분, 17:40 시작 → 18:10 종료)."""
         ticket = Ticket(
             intent="book_appointment",
@@ -970,7 +971,7 @@ class TestOperatingHours:
         assert "6시" in result.message
 
     @freeze_time(NOW_POLICY)
-    def test_weekday_530pm_revisit_ok(self):
+    def test_7_9_weekday_530pm_revisit_ok(self):
         """평일 17:30 재진(30분 → 18:00) — 정확히 경계, 허용."""
         ticket = Ticket(
             intent="book_appointment",
@@ -982,7 +983,7 @@ class TestOperatingHours:
         assert result.action == Action.BOOK_APPOINTMENT
 
     @freeze_time(NOW_POLICY)
-    def test_saturday_alternatives_respect_1pm_close(self):
+    def test_7_10_saturday_alternatives_respect_1pm_close(self):
         """토요일 대안 슬롯이 13:00 이후를 제시하지 않는지 확인."""
         from src.policy import suggest_alternative_slots
         # 2026-03-28 is Saturday, 12:00 요청
@@ -997,7 +998,7 @@ class TestOperatingHours:
             assert end.hour < 13 or (end.hour == 13 and end.minute == 0)
 
     @freeze_time(NOW_POLICY)
-    def test_lunch_alternatives_skip_lunch(self):
+    def test_7_11_lunch_alternatives_skip_lunch(self):
         """점심시간 때문에 거절된 경우 대안 슬롯이 점심을 건너뛰는지 확인."""
         from src.policy import suggest_alternative_slots
         suggestions = suggest_alternative_slots(
@@ -1013,7 +1014,7 @@ class TestOperatingHours:
             lunch_end = datetime(2026, 3, 26, 13, 30)
             assert not (max(slot, lunch_start) < min(slot_end, lunch_end))
 
-    def test_is_within_operating_hours_unit(self):
+    def test_7_12_is_within_operating_hours_unit(self):
         """is_within_operating_hours 단위 테스트."""
         # 평일 정상
         ok, _ = is_within_operating_hours(
@@ -1040,7 +1041,7 @@ class TestOperatingHours:
 
 
 # ─────────────────────────────────────────────────────────────
-# Category 7: 대화 상태 관리 (Dialogue State Machine)
+# Category 8: 대화 상태 관리 (Dialogue State Machine)
 # ─────────────────────────────────────────────────────────────
 
 class TestDialogueState:
@@ -1050,7 +1051,7 @@ class TestDialogueState:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_7_1_four_clarify_turns_escalates(
+    def test_8_1_four_clarify_turns_escalates(
         self,
         mock_safety, mock_intent, mock_policy, mock_resolve,
     ):
@@ -1085,7 +1086,7 @@ class TestDialogueState:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_7_2_accumulated_slots_persist(
+    def test_8_2_accumulated_slots_persist(
         self,
         mock_safety, mock_intent, mock_policy, mock_resolve,
     ):
@@ -1147,7 +1148,7 @@ class TestDialogueState:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_7_3_alternative_slot_selection(
+    def test_8_3_alternative_slot_selection(
         self,
         mock_safety, mock_intent, mock_policy, mock_resolve,
     ):
@@ -1204,7 +1205,7 @@ class TestDialogueState:
 
 
 # ─────────────────────────────────────────────────────────────
-# Category 8: Q4 Cal.com 외부 연동 & 장애 복구
+# Category 9: Q4 Cal.com 외부 연동 & 장애 복구
 # ─────────────────────────────────────────────────────────────
 
 class TestCalcomIntegration:
@@ -1214,7 +1215,7 @@ class TestCalcomIntegration:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_8_1_alternative_rejection_resets_state(
+    def test_9_1_alternative_rejection_resets_state(
         self,
         mock_safety, mock_intent, mock_policy, mock_resolve,
     ):
@@ -1270,7 +1271,7 @@ class TestCalcomIntegration:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_8_2_batch_calcom_500_no_false_success(
+    def test_9_2_batch_calcom_500_no_false_success(
         self,
         mock_safety, mock_intent, mock_policy,
         mock_resolve, mock_create_booking,
@@ -1304,7 +1305,7 @@ class TestCalcomIntegration:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_8_3_pre_confirm_slot_closed(
+    def test_9_3_pre_confirm_slot_closed(
         self,
         mock_safety, mock_intent, mock_policy, mock_resolve,
     ):
@@ -1344,7 +1345,7 @@ class TestCalcomIntegration:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_8_4_race_condition_409_no_local_save(
+    def test_9_4_race_condition_409_no_local_save(
         self,
         mock_safety, mock_intent, mock_policy,
         mock_resolve, mock_create_booking,
@@ -1396,7 +1397,7 @@ class TestCalcomIntegration:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_8_5_calcom_disabled_graceful_degradation(
+    def test_9_5_calcom_disabled_graceful_degradation(
         self,
         mock_safety, mock_intent, mock_policy,
         mock_resolve, mock_create_booking,
@@ -1429,7 +1430,7 @@ class TestCalcomIntegration:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_8_6_batch_slot_closed_with_alternatives(
+    def test_9_6_batch_slot_closed_with_alternatives(
         self,
         mock_safety, mock_intent, mock_policy,
         mock_resolve, mock_create_booking,
@@ -1463,7 +1464,7 @@ class TestCalcomIntegration:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_8_7_proactive_slot_listing_when_time_missing(
+    def test_9_7_proactive_slot_listing_when_time_missing(
         self,
         mock_safety, mock_intent, mock_policy, mock_resolve,
     ):
@@ -1507,7 +1508,7 @@ class TestCalcomIntegration:
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
-    def test_8_8_batch_create_timeout_no_local_save(
+    def test_9_8_batch_create_timeout_no_local_save(
         self,
         mock_safety, mock_intent, mock_policy,
         mock_resolve, mock_create_booking,
