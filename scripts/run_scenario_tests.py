@@ -792,74 +792,134 @@ def run_category_10():
         return
     R.log(f"  Cal.com 연동 활성 — 실제 슬롯 조회 + 예약 생성/취소 경로 검증")
 
-    future_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
-    future_display = (datetime.now() + timedelta(days=14)).strftime("%-m월 %-d일")
+    # 10개 시나리오가 서로 다른 날짜를 사용하여 Cal.com 슬롯 충돌 방지
+    # NOW(4/6) 기준으로 미래 날짜 생성 (Cal.com은 실제 날짜 사용)
+    base_date = NOW.replace(tzinfo=None) + timedelta(days=7)  # NOW+7일부터
+    book_times = ["09:00", "09:30", "10:00", "10:30", "11:00",
+                  "14:00", "14:30", "15:00", "15:30", "16:00"]
 
-    modify_cases = [
-        ("예약 변경할래요", f"{future_display} 오후 3시로요"),
-        ("예약 수정해주세요", f"{future_display} 오전 10시"),
-        ("시간 바꿔줘", f"{future_display} 오후 2시"),
-        ("예약 옮겨주세요", f"{future_display} 오전 11시"),
-        ("날짜를 변경하고 싶어요", f"{future_display} 오후 4시"),
+    modify_utterances = [
+        "예약 변경할래요", "예약 수정해주세요", "시간 바꿔줘",
+        "예약 옮겨주세요", "날짜를 변경하고 싶어요",
     ]
-    cancel_cases = [
+    cancel_utterances = [
         "예약 취소할게요", "예약 취소해주세요", "그 예약 빼줘", "안 갈래요", "예약 취소 부탁드립니다",
     ]
-    # 10 scenarios: 5 direct + 5 cross
     combos = [(i, i) for i in range(5)] + [(0, 2), (1, 3), (2, 4), (3, 0), (4, 1)]
 
     for idx, (mi, ci) in enumerate(combos, start=1):
-        mod_req, mod_slot = modify_cases[mi]
-        cancel_req = cancel_cases[ci]
+        # 각 시나리오마다 고유 날짜+시간 할당 (NOW 기준)
+        scenario_date = base_date + timedelta(days=idx)
+        # 주말 회피 (토→월, 일→월)
+        while scenario_date.weekday() >= 5:
+            scenario_date += timedelta(days=1)
+        date_display = scenario_date.strftime("%-m월 %-d일")
+        book_time = book_times[idx - 1]
+        book_hour = int(book_time.split(":")[0])
+        book_ampm = "오전" if book_hour < 12 else "오후"
+        book_hour_12 = book_hour if book_hour <= 12 else book_hour - 12
+        book_min = book_time.split(":")[1]
+        book_time_display = f"{book_ampm} {book_hour_12}시" + (f" {book_min}분" if book_min != "00" else "")
+
+        # 변경 목표: 30분 후 슬롯
+        modify_hour = book_hour
+        modify_min = int(book_min) + 30
+        if modify_min >= 60:
+            modify_hour += 1
+            modify_min -= 60
+        mod_ampm = "오전" if modify_hour < 12 else "오후"
+        mod_hour_12 = modify_hour if modify_hour <= 12 else modify_hour - 12
+        mod_time_display = f"{date_display} {mod_ampm} {mod_hour_12}시" + (f" {modify_min}분" if modify_min != 0 else "")
+
+        mod_req = modify_utterances[mi]
+        cancel_req = cancel_utterances[ci]
         _scenario_header(f"10-{idx}", f"예약→변경({mod_req[:6]})→취소({cancel_req[:6]})")
         _setup_isolated_storage()
+        calcom_uids = []  # Cal.com 예약 UID 추적 (정리용)
         try:
             # Phase 1: 예약
             session = _new_session(customer_name="김민수", customer_type="재진")
-            r = _send(session, f"{TOMORROW} 오후 2시 내과 예약하고 싶어요")
-            if "본인" in r.get("response", ""):
-                r = _send(session, "본인이에요")
-            if "연락처" in r.get("response", "") or "성함" in r.get("response", ""):
-                r = _send(session, "김민수 010-1234-5678")
-            if "예약할까요" in r.get("response", ""):
-                r = _send(session, "네")
+            r = _send(session, f"{date_display} {book_time_display} 내과 예약하고 싶어요")
+            for _ in range(6):
+                if r.get("action") != "clarify":
+                    break
+                resp = r.get("response", "")
+                if "본인" in resp:
+                    r = _send(session, "본인이에요")
+                elif "연락처" in resp or "성함" in resp:
+                    r = _send(session, "김민수 010-1234-5678")
+                elif "예약할까요" in resp:
+                    r = _send(session, "네")
+                elif "마감" in resp or "가능한" in resp:
+                    R.log(f"    슬롯 마감: {resp[:60]}")
+                    break
+                else:
+                    break
             book_ok = r.get("action") == "book_appointment"
+            if book_ok:
+                # Cal.com UID 추적
+                ds = session.get("dialogue_state", {})
+                for appt in session.get("all_appointments", []):
+                    uid = appt.get("calcom_uid") or appt.get("uid")
+                    if uid:
+                        calcom_uids.append(uid)
+            R.log(f"    Phase 1 (예약): action={r.get('action')}")
 
             # Phase 2: 변경
-            r = _send(session, mod_req)
-            for _ in range(5):
-                if r.get("action") != "clarify":
-                    break
-                resp = r.get("response", "")
-                if "본인" in resp:
-                    r = _send(session, "본인")
-                elif "연락처" in resp or "성함" in resp:
-                    r = _send(session, "김민수 010-1234-5678")
-                elif "날짜" in resp or "시간" in resp or "언제" in resp:
-                    r = _send(session, mod_slot)
-                else:
-                    break
-            modify_ok = r.get("action") == "modify_appointment"
+            if book_ok:
+                r = _send(session, mod_req)
+                mod_slot_sent = False
+                for _ in range(6):
+                    if r.get("action") != "clarify":
+                        break
+                    resp = r.get("response", "")
+                    if "본인" in resp:
+                        r = _send(session, "본인")
+                    elif "연락처" in resp or "성함" in resp:
+                        r = _send(session, "김민수 010-1234-5678")
+                    elif not mod_slot_sent:
+                        # 날짜/시간/언제/변경 등 다양한 질문에 대응
+                        r = _send(session, mod_time_display)
+                        mod_slot_sent = True
+                    else:
+                        break
+            modify_ok = book_ok and r.get("action") == "modify_appointment"
+            R.log(f"    Phase 2 (변경): action={r.get('action')}")
 
             # Phase 3: 취소
-            r = _send(session, cancel_req)
-            for _ in range(5):
-                if r.get("action") != "clarify":
-                    break
-                resp = r.get("response", "")
-                if "본인" in resp:
-                    r = _send(session, "본인")
-                elif "연락처" in resp or "성함" in resp:
-                    r = _send(session, "김민수 010-1234-5678")
-                else:
-                    break
-            cancel_ok = r.get("action") == "cancel_appointment"
+            if modify_ok or book_ok:
+                r = _send(session, cancel_req)
+                for _ in range(6):
+                    if r.get("action") != "clarify":
+                        break
+                    resp = r.get("response", "")
+                    if "본인" in resp:
+                        r = _send(session, "본인")
+                    elif "연락처" in resp or "성함" in resp:
+                        r = _send(session, "김민수 010-1234-5678")
+                    else:
+                        break
+            cancel_ok = (modify_ok or book_ok) and r.get("action") == "cancel_appointment"
+            R.log(f"    Phase 3 (취소): action={r.get('action')}")
 
             ok = book_ok and modify_ok and cancel_ok
             if not ok:
                 R.log(f"    book={book_ok} modify={modify_ok} cancel={cancel_ok}")
             _scenario_result(ok)
         finally:
+            # Cal.com 예약 잔여물 정리 — list_bookings로 테스트 환자 예약 조회 후 취소
+            try:
+                bookings = calcom_client.list_bookings() or []
+                for b in bookings:
+                    attendees = b.get("attendees", [])
+                    for att in attendees:
+                        if "010-1234-5678" in (att.get("email", "") or ""):
+                            uid = b.get("uid")
+                            if uid:
+                                calcom_client.cancel_booking_remote(uid)
+                            break
+            except Exception:
+                pass
             _teardown_isolated_storage()
 
 
