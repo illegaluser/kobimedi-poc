@@ -299,7 +299,11 @@ def cancel_booking_remote(booking_uid: str) -> Optional[bool]:
     headers = _common_headers("2024-08-13")
 
     try:
-        response = requests.delete(url, headers=headers, timeout=10)
+        response = requests.post(
+            url, headers=headers,
+            json={"cancellationReason": "cleanup"},
+            timeout=10,
+        )
 
         if response.status_code in (200, 204):
             return True

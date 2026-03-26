@@ -745,7 +745,7 @@ class TestCancelBookingRemote:
     def test_success_200_returns_true(self):
         """200 성공 → True."""
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
-            with patch("requests.delete", return_value=_mock_response(200, {"status": "success"})):
+            with patch("requests.post", return_value=_mock_response(200, {"status": "success"})):
                 assert calcom_client.cancel_booking_remote("abc-123") is True
 
     def test_success_204_returns_true(self):
@@ -754,24 +754,24 @@ class TestCancelBookingRemote:
         mock.status_code = 204
         mock.raise_for_status.return_value = None
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
-            with patch("requests.delete", return_value=mock):
+            with patch("requests.post", return_value=mock):
                 assert calcom_client.cancel_booking_remote("abc-123") is True
 
     def test_404_returns_true(self):
         """404 Not Found (이미 삭제됨) → True."""
         mock = _mock_response(404, {"error": "not found"})
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
-            with patch("requests.delete", return_value=mock):
+            with patch("requests.post", return_value=mock):
                 assert calcom_client.cancel_booking_remote("abc-123") is True
 
     def test_timeout_returns_none(self):
         """타임아웃 → None."""
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
-            with patch("requests.delete", side_effect=requests.Timeout("timeout")):
+            with patch("requests.post", side_effect=requests.Timeout("timeout")):
                 assert calcom_client.cancel_booking_remote("abc-123") is None
 
     def test_500_returns_none(self):
         """서버 오류 → None."""
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
-            with patch("requests.delete", return_value=_mock_response(500, {"error": "server"})):
+            with patch("requests.post", return_value=_mock_response(500, {"error": "server"})):
                 assert calcom_client.cancel_booking_remote("abc-123") is None
