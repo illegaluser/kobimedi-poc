@@ -36,7 +36,17 @@ kobimedi-poc/
 ├── data/
 │   ├── tickets.json         # 입력 티켓 50건
 │   └── bookings.json        # 예약 저장소 (진실원천)
-└── docs/                    # 문서 및 테스트 결과
+└── docs/
+    ├── final_report.md          # 최종 리포트 (Q1~Q4 통합)
+    ├── q1_metric_rubric.md      # Q1: PoC 성공 지표 제안서
+    ├── q3_safety.md             # Q3: 안전성 대응 방안
+    ├── architecture.md          # 에이전트 아키텍처 설계 문서
+    ├── policy_digest.md         # 진료 예약 정책 요약
+    ├── demo_evidence.md         # 인터랙티브 데모 증빙
+    ├── test_scenarios.md        # 테스트 시나리오 명세 (유닛 51 + E2E 28)
+    ├── test_results_unit.txt    # 유닛 테스트 실행 결과
+    ├── test_results_e2e.txt     # E2E 테스트 실행 결과
+    └── test_results_scenario.txt # 시나리오 테스트 실행 결과
 ```
 
 ## 시스템 아키텍처
