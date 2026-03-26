@@ -607,8 +607,8 @@ kobimedi-poc/
 
 | 도구 | 역할 | 활용 내용 |
 |------|------|----------|
-| **ChatGPT o3** (OpenAI) | 계획 수립 | 과제 요구사항 분석, 아키텍처 설계 방향 결정, `.ai/handoff/10_plan.md` 작업 계획 초안 작성, `features.json` 기능 체크리스트 설계 |
-| **Claude Code** (Anthropic CLI, claude-opus-4-6) | 코드 작성 | 핵심 로직 구현(`src/` 전체), 테스트 작성(226개 유닛 + 51개 시나리오), 문서 생성, 운영 스크립트 작성 |
+| **ChatGPT o4-mini-high** (OpenAI) | 계획 수립 | 과제 요구사항 분석, 아키텍처 설계 방향 결정, `.ai/handoff/10_plan.md` 작업 계획 초안 작성, `features.json` 기능 체크리스트 설계 |
+| **Claude Code** (Anthropic, claude-sonnet-4-6) | 코드 작성 | 핵심 로직 구현(`src/` 전체), 테스트 작성(226개 유닛 + 51개 시나리오), 문서 생성, 운영 스크립트 작성 |
 | **Gemini 2.5 Pro** (Google) | 코드 리뷰 | 구현된 코드의 정책 준수 여부 검토, AGENTS.md Non-Negotiables 대비 검증, 엣지 케이스 발굴 |
 | **Cline** (VS Code Extension) | 에이전트 오케스트레이션 | 위 AI 도구들을 하나의 워크플로로 연결. 계획→구현→리뷰→수정 사이클을 IDE 안에서 관리 |
 | **Ollama + qwen3-coder:30b** | 챗봇 LLM (런타임) | Safety gate LLM 폴백, 사용자 메시지 의도 분류, 분과/날짜/시간/환자 정보 추출 |
@@ -620,10 +620,10 @@ AI 도구를 단순한 코드 생성기가 아닌 **역할 분담 + 오케스트
 
 ```mermaid
 flowchart LR
-    plan["① Plan\nChatGPT o3\n요구사항 분석\n아키텍처 설계\n작업 계획 수립"]
-    impl["② Implement\nClaude Code\n핵심 로직 구현\n테스트 작성\n문서 생성"]
+    plan["① Plan\nChatGPT o4-mini-high\n요구사항 분석\n아키텍처 설계\n작업 계획 수립"]
+    impl["② Implement\nClaude Code\n(claude-sonnet-4-6)\n핵심 로직 구현\n테스트 작성"]
     review["③ Review\nGemini 2.5 Pro\n정책 준수 검토\n엣지 케이스 발굴\nNon-Negotiables 검증"]
-    fix["④ Fix\nClaude Code\n리뷰 반영 수정"]
+    fix["④ Fix\nClaude Code\n(claude-sonnet-4-6)\n리뷰 반영 수정"]
 
     plan --> impl --> review --> fix --> review
 
@@ -635,10 +635,10 @@ flowchart LR
 
 | 단계 | 담당 | 수행 내용 |
 |------|------|----------|
-| **① Plan** | ChatGPT o3 | 과제 요구사항(`00_request.md`)을 분석하여 전체 구현 계획(`10_plan.md`) 수립. 기능별 체크리스트(`features.json`)를 설계하고 우선순위를 결정. "Safety > Correctness > Policy > Demo > Q4" 순서로 Phase를 구성. |
-| **② Implement** | Claude Code | Plan 단계에서 도출된 체크리스트를 따라 `src/` 핵심 로직 TDD 방식으로 구현. 테스트 코드를 먼저 작성하고 구현을 채우는 방식. `features.json`의 `passes` 필드를 구현 완료 시 `true`로 갱신. |
+| **① Plan** | ChatGPT o4-mini-high | 과제 요구사항(`00_request.md`)을 분석하여 전체 구현 계획(`10_plan.md`) 수립. 기능별 체크리스트(`features.json`)를 설계하고 우선순위를 결정. "Safety > Correctness > Policy > Demo > Q4" 순서로 Phase를 구성. |
+| **② Implement** | Claude Code (claude-sonnet-4-6) | Plan 단계에서 도출된 체크리스트를 따라 `src/` 핵심 로직 TDD 방식으로 구현. 테스트 코드를 먼저 작성하고 구현을 채우는 방식. `features.json`의 `passes` 필드를 구현 완료 시 `true`로 갱신. |
 | **③ Review** | Gemini 2.5 Pro | `CLAUDE.md`의 10가지 Review Priorities 기준으로 구현 검토. 의료 상담 우회 가능성, action enum 원문 일치, safety gate 선행 여부, 정책 결정론 준수, 저장소 진실원천 여부 등을 검증. 발견된 문제를 `30_review.md`에 기록. |
-| **④ Fix** | Claude Code | 리뷰에서 발견된 문제를 수정하고 다시 리뷰를 거치는 사이클 반복. |
+| **④ Fix** | Claude Code (claude-sonnet-4-6) | 리뷰에서 발견된 문제를 수정하고 다시 리뷰를 거치는 사이클 반복. |
 | **오케스트레이션** | Cline (VS Code) | 위 4단계를 하나의 워크플로로 연결. `.ai/handoff/` 문서를 통해 각 에이전트에게 컨텍스트를 전달하고, 단계 간 인수인계를 관리. 사람이 직접 각 도구를 번갈아 호출하는 대신, Cline이 IDE 안에서 계획→구현→리뷰→수정 사이클을 자동화. |
 
 ### AI 에이전트 Harness
