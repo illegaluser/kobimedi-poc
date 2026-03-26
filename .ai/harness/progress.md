@@ -1,6 +1,6 @@
 # Progress
 
-## 2026-03-26: F-052 운영시간 정책 구현 + 시나리오 테스트 51개 + E2E 테스트 22개
+## 2026-03-26: F-052 운영시간 정책 구현 + 시나리오 테스트 체계 구축
 
 ### 구현 사항
 
@@ -14,7 +14,12 @@
 - `is_slot_available()`에 운영시간 검증 통합 — 기존 정원/겹침 검사 전에 실행
 - `suggest_alternative_slots()`에 토요일 13:00 종료 반영
 
-#### tests/test_scenarios.py — Mock 기반 시나리오 테스트 51개 (9개 카테고리)
+#### src/calcom_client.py — 예약 조회/취소 API 추가
+
+- `list_bookings()`: GET /bookings 전체 예약 조회
+- `cancel_booking_remote()`: POST /bookings/{uid}/cancel 원격 취소
+
+#### tests/test_scenarios.py — 유닛 테스트 51개 (9개 카테고리)
 
 - Category 1: 정상 예약 완료 (4개)
 - Category 2: 환자 식별 & 대리 예약 (4개)
@@ -26,15 +31,13 @@
 - Category 8: 대화 상태 관리 (3개)
 - Category 9: Q4 Cal.com 외부 연동 (8개)
 
-#### tests/test_e2e.py — 완전 E2E 테스트 22개 (Mock 없음)
+#### scripts/ — 운영 스크립트
 
-- 실제 Ollama(qwen3-coder:30b) + 실제 Storage + 실제 Cal.com API
-- LLM 비결정론 대응: action enum + 핵심 상태만 검증
-- `pytest.mark.e2e` 마커로 일반 테스트와 분리
-- `pytest.ini`에서 기본 실행 시 E2E 제외 (`addopts = -m "not e2e"`)
+- `run_scenario_tests.py`: 51개 시나리오를 실제 Ollama + Cal.com으로 실행하는 러너
+- `run_tests.sh`: 유닛 + 시나리오 통합 실행기 (`--scenario`, `--all`)
+- `cleanup_bookings.py`: Cal.com 예약 일괄 삭제 + 로컬 bookings.json 동기화
 
 ### 테스트 결과
 
-- Mock 기반: 214 passed, 0 failed, 22 deselected (6.45s)
-- E2E: 22 passed, 0 failed (53.48s)
-- 기존 테스트 회귀 없음
+- 유닛 테스트: 226 passed, 0 failed (~9초)
+- 시나리오 테스트: 51/51 PASS (~80초)
