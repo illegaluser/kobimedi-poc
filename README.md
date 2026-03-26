@@ -76,6 +76,65 @@
 
 ---
 
+## 과제 요구사항 대비 구현 현황
+
+### 필수 요구사항 (Q1~Q3)
+
+| 요구사항 | 세부 항목 | 상태 | 구현 파일 / 산출물 |
+|---------|----------|------|-------------------|
+| **Q1: Metric Rubric** | 성공 지표 KPI 2~3개 (목표 수치) | 완료 | [docs/q1_metric_rubric.md](docs/q1_metric_rubric.md) |
+| | 안전/제약 지표 1~2개 (임계값) | 완료 | 의료 오답률 0%, 치명적 실패율 <1% |
+| | 지표별 선정 근거 + 측정 방법 | 완료 | 비용 구조 분석 기반 |
+| **Q2: Agent 구현** | 모드 1 — 인터랙티브 데모 (`chat.py`) | 완료 | `chat.py` → `src/agent.py` |
+| | 모드 2 — 배치 처리 (`run.py`) | 완료 | `run.py` → `src/agent.py` |
+| | 두 모드가 동일한 Agent 로직 공유 | 완료 | `chat.py`와 `run.py` 모두 `src/agent.py`의 `process_ticket()` 호출 |
+| | 진료 예약 정책 위반 여부 판단 | 완료 | `src/policy.py` — 운영시간, 정원, 24시간 룰, 초진/재진 |
+| | 의료 상담 / 목적 외 사용 거부 | 완료 | `src/classifier.py` — Safety Gate (규칙 기반 + LLM 폴백) |
+| | 모호한 요청에 clarification 응답 | 완료 | `src/agent.py` — pending_missing_info 큐, clarify_turn_count |
+| | 배치 출력 JSON 스키마 준수 | 완료 | ticket_id, classified_intent, department, action, response, confidence, reasoning |
+| **Q2: 데모 증빙** | 정상 예약 처리 스크린샷 | 완료 | [docs/demo_evidence.md](docs/demo_evidence.md) |
+| | 의료 상담 거부 스크린샷 | 완료 | 동일 문서 |
+| | 모호한 요청 → clarification 스크린샷 | 완료 | 동일 문서 |
+| **Q3: 안전성 대응** | 실패율 0% 달성의 기술적 의미 | 완료 | [docs/q3_safety.md](docs/q3_safety.md) |
+| | 기술적 가드레일 + 프로세스 | 완료 | Safety Gate Fast-path, LLM 생성 배제, 혼합 요청 보수적 차단 |
+| | Metric Rubric 변경 필요 시 수정안 | 완료 | 의료 오답률 0% 지표 추가 |
+| | 잔존 리스크 + 고객 커뮤니케이션 | 완료 | 동일 문서 |
+| **리포트** | Q1~Q3 통합 리포트 1부 | 완료 | [docs/final_report.md](docs/final_report.md) |
+| | AI 도구 활용 내역 | 완료 | 동일 문서 §6 |
+
+### 선택 요구사항 (Q4: cal.com 연동)
+
+| 요구사항 | 세부 항목 | 상태 | 구현 파일 / 산출물 |
+|---------|----------|------|-------------------|
+| **Q4: cal.com** | 3개 Event Type 설정 (이비인후과/내과/정형외과) | 완료 | `.env` — CALCOM_ENT_ID, CALCOM_INTERNAL_ID, CALCOM_ORTHO_ID |
+| | available slots API로 가용 시간 조회 | 완료 | `src/calcom_client.py` — `get_available_slots()` |
+| | 고객에게 가용 시간 공유 응답 | 완료 | `src/agent.py` — 선제적 슬롯 안내 (시간 미입력 시) |
+| | 실제 booking 생성 | 완료 | `src/calcom_client.py` — `create_booking()` |
+| | 1시간당 3명 정책 적용 | 완료 | 로컬 `policy.py` + Cal.com slot availability 이중 검증 |
+| | 거짓 성공 방지 (API 실패 시) | 완료 | Cal.com 실패 → 로컬 저장 차단, AGENT_HARD_FAIL 기록 |
+| | Graceful Degradation (API 키 미설정) | 완료 | `is_calcom_enabled()` — 로컬 정책만으로 정상 동작 |
+
+### 예약 정책 구현 현황
+
+| 정책 규칙 | 상태 | 구현 위치 | 테스트 |
+|-----------|------|----------|--------|
+| 예약에 분과 + 날짜 + 시간 필수 | 완료 | `src/agent.py` — missing_info 큐 | 시나리오 1-2, 8-2 |
+| 1시간당 최대 3명 | 완료 | `src/policy.py` — `is_slot_available()` | 시나리오 3-2, 3-3 |
+| 초진 40분 / 재진 30분 슬롯 | 완료 | `src/policy.py` — `get_appointment_duration()` | 시나리오 3-1 |
+| 평일 09:00-18:00 | 완료 | `src/policy.py` — `is_within_operating_hours()` | 시나리오 7-7, 7-8, 7-9 |
+| 토요일 09:00-13:00 | 완료 | 동일 | 시나리오 7-5, 7-6 |
+| 일요일/공휴일 휴진 | 완료 | 동일 | 시나리오 7-4 |
+| 점심시간 12:30-13:30 예약 불가 | 완료 | 동일 | 시나리오 7-1, 7-2, 7-3 |
+| 변경/취소 24시간 전까지 | 완료 | `src/policy.py` — `is_change_or_cancel_allowed()` | 시나리오 4-1 ~ 4-4 |
+| 대리 예약 시 환자 이름 + 연락처 확인 | 완료 | `src/agent.py` — proxy 식별 흐름 | 시나리오 2-1 ~ 2-4 |
+| 증상 기반 분과 안내 (진단 아닌 안내) | 완료 | `src/classifier.py` — department_hint | 시나리오 6-2 |
+| 의료 상담 절대 금지 | 완료 | `src/classifier.py` — Safety Gate | 시나리오 5-1 ~ 5-7 |
+| 프롬프트 인젝션 거부 | 완료 | `src/classifier.py` — INJECTION_PATTERNS | 시나리오 5-5 |
+| 개인정보 보호 (타 환자 정보 차단) | 완료 | `src/classifier.py` — PRIVACY_REQUEST_PATTERNS | 시나리오 5-2 |
+| 에스컬레이션 (응급/불만/보험) | 완료 | `src/classifier.py` — EMERGENCY/COMPLAINT/OPERATIONAL 패턴 | 시나리오 5-3, 5-7 |
+
+---
+
 ## 설치 및 실행 가이드
 
 GitHub에서 clone한 후 `chat.py` 또는 `run.py`를 실행하기까지의 전체 과정이다.
