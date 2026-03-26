@@ -1093,6 +1093,7 @@ def _determine_dialogue_missing_info(
     customer_name: str | None,
     birth_date: str | None,
     history_resolution: dict | None,
+    target_appointment: dict | None = None,
 ) -> list[str]:
     if action in BOOKING_RELATED_ACTIONS and is_chat and is_proxy_booking is None:
         return ["is_proxy_booking"]
@@ -1126,12 +1127,17 @@ def _determine_dialogue_missing_info(
             missing.append("time")
 
     if action == "modify_appointment":
-        if not slots.get("date") and not slots.get("time"):
+        # 기존 예약과 동일한 date/time이면 새 값 미입력으로 간주
+        existing_date = (target_appointment or {}).get("date")
+        existing_time = (target_appointment or {}).get("time")
+        new_date = slots.get("date")
+        new_time = slots.get("time")
+        date_is_new = new_date and new_date != existing_date
+        time_is_new = new_time and new_time != existing_time
+        has_any_change = date_is_new or time_is_new
+        if not has_any_change:
+            # 둘 다 기존과 동일하거나 미입력 → 새 날짜/시간 모두 수집
             missing.append("date")
-            missing.append("time")
-        elif not slots.get("date"):
-            missing.append("date")
-        elif not slots.get("time"):
             missing.append("time")
 
     if not customer_name and patient_name and is_proxy_booking is False:
@@ -1755,6 +1761,13 @@ def process_ticket(
         if state is not None and effective_patient_contact:
             state["patient_contact"] = effective_patient_contact
 
+    # modify 시 기존 예약 참조: existing_appointment가 없으면 all_appointments에서 탐색
+    _modify_target = existing_appointment
+    if action == "modify_appointment" and _modify_target is None and all_appointments:
+        _candidates = _find_customer_appointments(ticket, all_appointments, None)
+        if len(_candidates) == 1:
+            _modify_target = _candidates[0]
+
     dialogue_missing_info = _determine_dialogue_missing_info(
         action=action,
         slots=merged_slots,
@@ -1765,6 +1778,7 @@ def process_ticket(
         customer_name=effective_customer_name,
         birth_date=effective_birth_date,
         history_resolution=history_resolution,
+        target_appointment=_modify_target,
     )
     if dialogue_missing_info:
         if _should_escalate_for_clarify_limit(state, dialogue_missing_info):
