@@ -10,7 +10,7 @@ from unittest.mock import Mock
 
 from .classifier import safety_check, classify_intent
 from . import calcom_client
-from .policy import apply_policy
+from .policy import apply_policy, get_appointment_duration, is_within_operating_hours
 from .response_builder import (
     build_appointment_options_question,
     build_confirmation_question,
@@ -1813,8 +1813,26 @@ def process_ticket(
                     merged_slots["department"], merged_slots["date"]
                 )
                 if proactive_slots is not None and proactive_slots:
-                    slots_str = ", ".join(proactive_slots)
-                    clarify_message = f"예약 가능한 시간은 {slots_str}입니다. 언제가 좋으신가요?"
+                    # 초진/재진에 따른 진료시간으로 운영시간 내 슬롯만 필터링
+                    _ct = (history_resolution or {}).get("customer_type")
+                    _is_first = _ct not in ("재진", "revisit")
+                    _duration = get_appointment_duration(_is_first)
+                    _date_str = merged_slots["date"]
+                    filtered_slots = []
+                    for s in proactive_slots:
+                        _start = datetime.fromisoformat(f"{_date_str}T{s}:00")
+                        _end = _start + _duration
+                        _ok, _ = is_within_operating_hours(_start, _end)
+                        if _ok:
+                            filtered_slots.append(s)
+                    if filtered_slots:
+                        slots_str = ", ".join(filtered_slots)
+                        if _is_first:
+                            clarify_message = f"초진 환자는 진료시간이 40분 소요됩니다. 예약 가능한 시간은 {slots_str}입니다. 언제가 좋으신가요?"
+                        else:
+                            clarify_message = f"예약 가능한 시간은 {slots_str}입니다. 언제가 좋으신가요?"
+                    else:
+                        clarify_message = "해당 날짜에 예약 가능한 시간이 없습니다. 다른 날짜를 선택해주세요."
             except Exception as exc:
                 logger.debug("cal.com proactive slot query failed: %s", exc)
 
