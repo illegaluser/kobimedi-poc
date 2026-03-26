@@ -187,21 +187,32 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-    chat["chat.py"] --> agent["src/agent.py\n(공유 핵심 로직)"]
-    run["run.py"] --> agent
+    chat["chat.py\n인터랙티브 챗봇"] --> agent["src/agent.py\n핵심 ���이프라인\n(두 모드 공유)"]
+    run["run.py\n배치 처리"] --> agent
 
-    agent --> classifier["classifier.py"]
-    agent --> policy["policy.py\n(순수 산술)"]
-    agent --> storage["storage.py"]
-    agent --> calcom["calcom_client.py"]
-    agent --> response["response_builder.py"]
-    agent --> metrics["metrics.py"]
+    agent --> classifier["classifier.py\nSafety gate +\n의도 분류 (LLM)"]
+    agent --> policy["policy.py\n결정론적 정책 엔진\n(순수 Python 산술)"]
+    agent --> storage["storage.py\n예약 저장소 관리\n(진실원천)"]
+    agent --> calcom["calcom_client.py\nCal.com API v2\n외부 캘린더 연동"]
+    agent --> response["response_builder.py\n한국어 응답 생성"]
+    agent --> metrics["metrics.py\nKPI 이벤트 기록"]
 
-    classifier --> llm["llm_client.py"]
-    llm --> ollama["Ollama"]
-    storage --> bookings["bookings.json"]
-    calcom --> calcomapi["Cal.com API v2"]
+    classifier --> llm["llm_client.py\nOllama 호출 래퍼\nJSON 파싱 + 재시도"]
+    llm --> ollama[("Ollama\nqwen3-coder:30b")]
+    storage --> bookings[("bookings.json\n예약 데이터")]
+    calcom --> calcomapi[("Cal.com API v2\n슬롯 조회 + 예약 생성")]
 ```
+
+| 모듈 | 역할 |
+|------|------|
+| `agent.py` | 7단계 파이프라인을 순서대로 실행하는 핵심 오케스트레이터. `chat.py`와 `run.py`가 모두 이 파일의 `process_ticket()`을 호출합니다. |
+| `classifier.py` | 사용자 메시지가 안전한지 판단(Safety Gate)하고, 안전한 경우 Ollama LLM을 호출하여 7개 action 중 하나��� 의도를 분류하며 분과/날짜/시간/환자 정보를 추출합니다. |
+| `policy.py` | 예약 가능 여부를 **LLM 없이 Python 코드로만** 결정합니다. 운영시간, 정원(1시간 3명), 슬롯 겹침, 24시간 변경/취소 룰, 초진 40분 슬롯 등 모든 예약 정책을 산술적으로 검사합니다. |
+| `storage.py` | `data/bookings.json` 파일을 읽고 쓰는 저장�� 계층입니다. 전화번호 기반 환자 식별, ���진/재진 판정, 예약 생성/취소, 원��적 파일 저장(temp + rename)을 담당합니다. |
+| `calcom_client.py` | Cal.com API v2와의 모든 HTTP 통신을 캡슐화합니다. 가용 슬롯 조회(`GET /slots`), 예약 생성(`POST /bookings`), 예약 취소(`POST /bookings/{uid}/cancel`)를 제공하며, 타임아웃/네트워크 오류 시 `None`을 반환하여 거짓 성공을 방지합니다. |
+| `response_builder.py` | 최종 응답 한국어 메시지를 조립합니다. 확인 질문, 성공 안내, clarify 질문, 대안 슬롯 제시 등 상황별 응답 템플릿을 관리합니다. |
+| `llm_client.py` | Ollama API 호출을 래핑합니다. `format='json'`으로 JSON 응답을 강제하고, JSON 파싱 실패 시 1회 재시도, 연결 거부/타임아웃 시 안전한 폴백을 반환합니다. |
+| `metrics.py` | `agent_success`, `agent_soft_fail_clarify`, `agent_hard_fail`, `safe_reject` 등 KPI 이벤트를 기록합니다. 배치 모드에서 전체 처리 결과를 집계하는 데 사용됩니다. |
 
 ---
 
