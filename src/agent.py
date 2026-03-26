@@ -542,7 +542,7 @@ def _is_negative(message: str) -> bool:
 
 def _infer_requested_action(message: str) -> str | None:
     text = _normalize_text(message)
-    if any(keyword in text for keyword in ["취소", "예약 취소"]):
+    if any(keyword in text for keyword in ["취소", "예약 취소", "빼줘", "안 갈래", "안갈래", "못 가", "못가"]):
         return "cancel_appointment"
     if any(keyword in text for keyword in ["변경", "바꿔", "옮겨", "수정"]):
         return "modify_appointment"

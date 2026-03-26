@@ -585,6 +585,7 @@ def _is_booking_related(text: str) -> bool:
         "예약", "진료", "접수", "변경", "취소", "확인",
         "분과", "진료과",
         "바꿔", "옮겨", "수정",
+        "빼줘", "안 갈래", "안갈래", "못 가", "못가",
     ])
 
 
@@ -615,7 +616,7 @@ def _extract_safe_booking_subrequest(text: str) -> str | None:
 
 
 def _infer_action_from_text(text: str) -> str:
-    if any(keyword in text for keyword in ["취소", "예약 취소"]):
+    if any(keyword in text for keyword in ["취소", "예약 취소", "빼줘", "안 갈래", "안갈래", "못 가", "못가"]):
         return Action.CANCEL_APPOINTMENT.value
     if any(keyword in text for keyword in ["변경", "바꿔", "옮겨", "수정"]):
         return Action.MODIFY_APPOINTMENT.value
