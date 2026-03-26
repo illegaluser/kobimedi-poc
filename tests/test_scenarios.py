@@ -1623,13 +1623,14 @@ class TestBookModifyCancelFlow:
         "modify_req,modify_slot,new_date,new_time,cancel_req",
         [pytest.param(*s, id=f"10-{i+1}") for i, s in enumerate(_BMC_SCENARIOS)],
     )
+    @patch("src.agent.cancel_booking", return_value=True)
     @patch("src.agent.create_booking")
     @patch("src.agent.resolve_customer_type_from_history")
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
     def test_full_flow(
-        self, mock_safety, mock_intent, mock_policy, mock_resolve, mock_create,
+        self, mock_safety, mock_intent, mock_policy, mock_resolve, mock_create, mock_cancel,
         modify_req, modify_slot, new_date, new_time, cancel_req,
     ):
         # ── Phase 1: 예약 (Cal.com 슬롯 검증 포함) ──
@@ -1646,7 +1647,9 @@ class TestBookModifyCancelFlow:
         mock_policy.return_value = PolicyResult(action=Action.MODIFY_APPOINTMENT)
 
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False), \
-             patch("src.calcom_client.get_available_slots", return_value=[new_time]):
+             patch("src.calcom_client.get_available_slots", return_value=[new_time]), \
+             patch("src.calcom_client.cancel_booking_remote", return_value=True), \
+             patch("src.calcom_client.create_booking", return_value={"uid": "calcom-002"}):
             r = process_ticket({"message": modify_req}, all_appointments=all_appts,
                                existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
             assert r["action"] == "clarify"
@@ -1676,20 +1679,21 @@ class TestBookModifyCancelFlow:
         mock_intent.side_effect = _bmc_intent("cancel_appointment", date=new_date, time=new_time)
         mock_policy.return_value = PolicyResult(action=Action.CANCEL_APPOINTMENT)
 
-        r = process_ticket({"message": cancel_req}, all_appointments=all_appts,
-                           existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+        with patch("src.calcom_client.cancel_booking_remote", return_value=True):
+            r = process_ticket({"message": cancel_req}, all_appointments=all_appts,
+                               existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
 
-        max_turns = 5
-        while r["action"] == "clarify" and max_turns > 0:
-            max_turns -= 1
-            if "본인이신가요" in r["response"]:
-                r = process_ticket({"message": "본인"}, all_appointments=all_appts,
-                                   existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
-            elif "연락처" in r["response"] or "성함" in r["response"]:
-                r = process_ticket({"message": "김민수 010-1234-5678"}, all_appointments=all_appts,
-                                   existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
-            else:
-                break
+            max_turns = 5
+            while r["action"] == "clarify" and max_turns > 0:
+                max_turns -= 1
+                if "본인이신가요" in r["response"]:
+                    r = process_ticket({"message": "본인"}, all_appointments=all_appts,
+                                       existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+                elif "연락처" in r["response"] or "성함" in r["response"]:
+                    r = process_ticket({"message": "김민수 010-1234-5678"}, all_appointments=all_appts,
+                                       existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+                else:
+                    break
 
         assert r["action"] == "cancel_appointment", (
             f"취소 완료 기대했으나 action={r['action']}, response={r['response']}")

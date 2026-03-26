@@ -2288,15 +2288,62 @@ def process_ticket(
         booking_id = target_existing_appointment.get("id")
         if booking_id:
             try:
-                cancel_booking(booking_id)
+                if not cancel_booking(booking_id):
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        session_state,
+                        action="clarify",
+                        message="예약 취소 처리 중 문제가 발생했습니다. 다시 한 번 시도해 주세요.",
+                        department=department,
+                        ticket=ticket,
+                        classified_intent="cancel_appointment",
+                        intent_result=intent_result,
+                        policy_result={"allowed": True},
+                        customer_type=customer_type,
+                    )
             except Exception:
-                logger.debug("로컬 예약 취소 실패: %s", booking_id)
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                return _build_response_and_record(
+                    session_state,
+                    action="clarify",
+                    message="예약 취소 처리 중 문제가 발생했습니다. 다시 한 번 시도해 주세요.",
+                    department=department,
+                    ticket=ticket,
+                    classified_intent="cancel_appointment",
+                    intent_result=intent_result,
+                    policy_result={"allowed": True},
+                    customer_type=customer_type,
+                )
         calcom_uid = target_existing_appointment.get("calcom_uid")
         if calcom_uid and calcom_client.is_calcom_enabled(target_existing_appointment.get("department", "")):
             try:
-                calcom_client.cancel_booking_remote(calcom_uid)
+                cc_result = calcom_client.cancel_booking_remote(calcom_uid)
+                if cc_result is None:
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        session_state,
+                        action="clarify",
+                        message="현재 외부 예약 시스템 응답 지연으로 취소 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                        department=department,
+                        ticket=ticket,
+                        classified_intent="cancel_appointment",
+                        intent_result=intent_result,
+                        policy_result={"allowed": True},
+                        customer_type=customer_type,
+                    )
             except Exception:
-                logger.debug("Cal.com 원격 취소 실패: uid=%s", calcom_uid)
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                return _build_response_and_record(
+                    session_state,
+                    action="clarify",
+                    message="현재 외부 예약 시스템 응답 지연으로 취소 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                    department=department,
+                    ticket=ticket,
+                    classified_intent="cancel_appointment",
+                    intent_result=intent_result,
+                    policy_result={"allowed": True},
+                    customer_type=customer_type,
+                )
 
     # ── 예약 변경 실행: 기존 취소 + 신규 생성 (Cal.com은 수정 API 없음) ──
     if action == "modify_appointment" and target_existing_appointment:
@@ -2307,16 +2354,63 @@ def process_ticket(
         # 1) 기존 예약 취소 (로컬)
         if old_id:
             try:
-                cancel_booking(old_id)
+                if not cancel_booking(old_id):
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        session_state,
+                        action="clarify",
+                        message="기존 예약 취소 처리 중 문제가 발생했습니다. 다시 한 번 시도해 주세요.",
+                        department=dept,
+                        ticket=ticket,
+                        classified_intent="modify_appointment",
+                        intent_result=intent_result,
+                        policy_result={"allowed": True},
+                        customer_type=customer_type,
+                    )
             except Exception:
-                logger.debug("변경: 기존 예약 로컬 취소 실패: %s", old_id)
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                return _build_response_and_record(
+                    session_state,
+                    action="clarify",
+                    message="기존 예약 취소 처리 중 문제가 발생했습니다. 다시 한 번 시도해 주세요.",
+                    department=dept,
+                    ticket=ticket,
+                    classified_intent="modify_appointment",
+                    intent_result=intent_result,
+                    policy_result={"allowed": True},
+                    customer_type=customer_type,
+                )
 
         # 2) 기존 예약 취소 (Cal.com)
         if old_calcom_uid and calcom_client.is_calcom_enabled(dept or ""):
             try:
-                calcom_client.cancel_booking_remote(old_calcom_uid)
+                cc_result = calcom_client.cancel_booking_remote(old_calcom_uid)
+                if cc_result is None:
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        session_state,
+                        action="clarify",
+                        message="현재 외부 예약 시스템 응답 지연으로 변경 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                        department=dept,
+                        ticket=ticket,
+                        classified_intent="modify_appointment",
+                        intent_result=intent_result,
+                        policy_result={"allowed": True},
+                        customer_type=customer_type,
+                    )
             except Exception:
-                logger.debug("변경: Cal.com 기존 예약 취소 실패: uid=%s", old_calcom_uid)
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                return _build_response_and_record(
+                    session_state,
+                    action="clarify",
+                    message="현재 외부 예약 시스템 응답 지연으로 변경 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                    department=dept,
+                    ticket=ticket,
+                    classified_intent="modify_appointment",
+                    intent_result=intent_result,
+                    policy_result={"allowed": True},
+                    customer_type=customer_type,
+                )
 
         # 3) 새 시간으로 예약 생성
         new_appointment = {
@@ -2344,10 +2438,32 @@ def process_ticket(
                 )
                 if isinstance(cc_new, dict) and cc_new.get("uid"):
                     new_appointment["calcom_uid"] = cc_new["uid"]
-                elif cc_new is None or cc_new is False:
-                    logger.debug("변경: Cal.com 새 예약 생성 실패")
+                elif cc_new is None:
+                    record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                    return _build_response_and_record(
+                        session_state,
+                        action="clarify",
+                        message="현재 외부 예약 시스템 응답 지연으로 변경 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                        department=dept,
+                        ticket=ticket,
+                        classified_intent="modify_appointment",
+                        intent_result=intent_result,
+                        policy_result={"allowed": True},
+                        customer_type=customer_type,
+                    )
             except Exception:
-                logger.debug("변경: Cal.com 새 예약 생성 오류")
+                record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+                return _build_response_and_record(
+                    session_state,
+                    action="clarify",
+                    message="현재 외부 예약 시스템 응답 지연으로 변경 처리가 불가합니다. 잠시 후 다시 시도해주세요.",
+                    department=dept,
+                    ticket=ticket,
+                    classified_intent="modify_appointment",
+                    intent_result=intent_result,
+                    policy_result={"allowed": True},
+                    customer_type=customer_type,
+                )
 
         # 로컬 저장
         try:
@@ -2355,7 +2471,18 @@ def process_ticket(
             all_appointments.append(persisted)
             target_existing_appointment = persisted
         except Exception:
-            logger.debug("변경: 로컬 저장 실패")
+            record_kpi_event(KpiEvent.AGENT_HARD_FAIL)
+            return _build_response_and_record(
+                session_state,
+                action="clarify",
+                message="변경된 예약 정보를 저장하는 중 문제가 발생했습니다. 다시 한 번 시도해 주세요.",
+                department=dept,
+                ticket=ticket,
+                classified_intent="modify_appointment",
+                intent_result=intent_result,
+                policy_result={"allowed": True},
+                customer_type=customer_type,
+            )
 
     success_reference = target_existing_appointment or {
         "department": department,
