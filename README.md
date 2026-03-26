@@ -502,7 +502,7 @@ python scripts/run_scenario_tests.py --policy-only
 
 ### `scripts/run_scenario_tests.py` — 시나리오 테스트 러너
 
-51개 시나리오를 실제 LLM으로 실행하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력합니다. 비개발자에게 동작을 데모하거나, LLM 모델 변경 후 품질을 검수할 때 유용합니다.
+[docs/test_scenarios.md](docs/test_scenarios.md)에 정의된 51개 시나리오를 실제 LLM으로 실행하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력합니다. 비개발자에게 동작을 데모하거나, LLM 모델 변경 후 품질을 검수할 때 유용합니다.
 
 ```bash
 python scripts/run_scenario_tests.py                    # 전체 9개 카테고리
