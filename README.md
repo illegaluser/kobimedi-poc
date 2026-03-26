@@ -263,21 +263,27 @@ python scripts/cleanup_bookings.py --local-only
 | `tests/test_generalization.py` | 3 | 일반화 (한국어 인젝션, 혼합 요청, 모호한 환자 유형) |
 | `tests/test_batch.py` | 1 | 배치 모드 (run.py 출력 스키마 + KPI 메트릭) |
 
-### 3가지 테스트 레벨
+### 2가지 테스트 레벨
 
-| 구분 | 실행 방법 | LLM | 검증 수준 | 속도 |
-|------|----------|-----|----------|------|
-| 유닛 테스트 (226개) | `pytest tests/` | Mock | 정확한 문자열 + action + 상태 | ~9초 |
-| E2E 테스트 (28개) | `pytest tests/test_e2e.py -m e2e` | 실제 Ollama | action enum (느슨) | ~70초 |
-| 시나리오 러너 (51개) | `python scripts/run_scenario_tests.py` | 실제 Ollama | action + 응답 + 상태 전이 (상세) | ~80초 |
+| 레벨 | 설명 | LLM | 속도 |
+|------|------|-----|------|
+| **유닛 테스트** (226개) | Mock 기반, 각 컴포넌트 격리 검증 | Mock | ~9초 |
+| **시나리오 테스트** (51+28개) | 실제 Ollama + Cal.com + Storage, 대화 흐름 검증 | 실제 호출 | ~80초 |
+
+시나리오 테스트는 두 가지 인터페이스로 실행할 수 있다.
+
+| 인터페이스 | 실행 방법 | 출력 형식 | 용도 |
+|-----------|----------|----------|------|
+| 시나리오 러너 (51개) | `python scripts/run_scenario_tests.py` | 턴별 대화 로그 + 상세 리포트 | 데모, 검수, 디버깅 |
+| pytest E2E (28개) | `pytest tests/test_e2e.py -m e2e` | PASS/FAIL | CI 자동 회귀 판정 |
 
 ### 실행 환경 요구 사항
 
-| 항목 | 유닛 | E2E / 시나리오 |
-|------|------|--------------|
+| 항목 | 유닛 테스트 | 시나리오 테스트 |
+|------|-----------|--------------|
 | Python 3.12+ | 필수 | 필수 |
 | Ollama + qwen3-coder:30b | 불필요 | 필수 |
-| .env (CALCOM_API_KEY) | 불필요 | Cal.com 관련 테스트만 |
+| .env (CALCOM_API_KEY) | 불필요 | Cal.com 관련 시나리오만 |
 
 ### 시나리오 명세서
 
