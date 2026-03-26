@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+sys.dont_write_bytecode = True
+
 from src.agent import create_session, process_message
 
 

@@ -1420,11 +1420,9 @@ def _find_customer_appointments(ticket: dict, all_appointments: list[dict], exis
         matches.append(appointment)
 
     merged_matches = _merge_appointment_sources(storage_matches, matches)
-    if merged_matches:
-        return merged_matches
 
     # 로컬에 없으면 Cal.com에서 조회 (폴백)
-    if patient_contact:
+    if not merged_matches and patient_contact:
         phone_digits = patient_contact.replace("-", "")
         try:
             calcom_bookings = calcom_client.list_bookings() or []
@@ -1433,12 +1431,25 @@ def _find_customer_appointments(ticket: dict, all_appointments: list[dict], exis
                     if phone_digits in (att.get("email", "") or ""):
                         converted = _convert_calcom_booking_to_local(cb)
                         if converted and converted.get("status") == "active":
-                            matches.append(converted)
+                            merged_matches.append(converted)
                         break
         except Exception:
             pass
-    if matches:
-        return matches
+
+    # cancelled 제외 + 날짜/시간/분과 기준 중복 제거
+    seen_slots: set[tuple] = set()
+    active_matches: list[dict] = []
+    for appt in merged_matches:
+        if appt.get("status") == "cancelled":
+            continue
+        slot_key = (appt.get("date"), appt.get("time"), appt.get("department"))
+        if slot_key in seen_slots:
+            continue
+        seen_slots.add(slot_key)
+        active_matches.append(appt)
+
+    if active_matches:
+        return active_matches
 
     if existing_appointment:
         return [existing_appointment]

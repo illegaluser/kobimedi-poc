@@ -21,6 +21,8 @@
 | `dd96589` 이후 | 예약 변경 시 로컬/Cal.com 모두 미반영 | 기존 취소(로컬+Cal.com) + 신규 생성(로컬+Cal.com) 구현 |
 | 이번 커밋 | 예약 확인/변경/취소 시 Cal.com 예약 조회 불가 | _find_customer_appointments에 Cal.com list_bookings 폴백 추가 |
 | 이번 커밋 | Cal.com 연동 E2E 검증 스크립트 없음 | verify_calcom_lifecycle.py: 예약→Cal.com확인→변경→확인→취소→확인 6단계 검증 |
+| 이번 커밋 | .pyc 캐시가 이전 코드를 참조하여 수정 미반영 | chat.py/run.py에 sys.dont_write_bytecode=True 적용 |
+| 이번 커밋 | 예약 확인 시 동일 예약이 중복 표시 | cancelled 제외 + 날짜/시간/분과 기준 중복 제거 |
 
 ### 신규 스크립트
 
