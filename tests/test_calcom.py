@@ -674,3 +674,104 @@ class TestBatchModeCalcom:
                             )
 
         assert result["action"] == "book_appointment"
+
+
+# ─────────────────────────────────────────────────────────────
+# list_bookings 테스트
+# ─────────────────────────────────────────────────────────────
+
+class TestListBookings:
+    """list_bookings() 단위 테스트."""
+
+    def test_disabled_returns_none(self):
+        """API 키 미설정 → None."""
+        with patch.dict(os.environ, {}, clear=True):
+            env = {k: v for k, v in os.environ.items() if k != "CALCOM_API_KEY"}
+            with patch.dict(os.environ, env, clear=True):
+                assert calcom_client.list_bookings() is None
+
+    def test_success_returns_list(self):
+        """정상 응답 → list 반환."""
+        body = {"status": "success", "data": [
+            {"uid": "abc-123", "title": "내과", "start": "2026-04-01T10:00:00Z"},
+            {"uid": "def-456", "title": "이비인후과", "start": "2026-04-01T11:00:00Z"},
+        ]}
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.get", return_value=_mock_response(200, body)):
+                result = calcom_client.list_bookings()
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+    def test_empty_returns_empty_list(self):
+        """예약 없음 → 빈 리스트."""
+        body = {"status": "success", "data": []}
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.get", return_value=_mock_response(200, body)):
+                result = calcom_client.list_bookings()
+        assert result == []
+
+    def test_timeout_returns_none(self):
+        """타임아웃 → None."""
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.get", side_effect=requests.Timeout("timeout")):
+                assert calcom_client.list_bookings() is None
+
+    def test_500_returns_none(self):
+        """서버 오류 → None."""
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.get", return_value=_mock_response(500, {"error": "server"})):
+                assert calcom_client.list_bookings() is None
+
+
+# ─────────────────────────────────────────────────────────────
+# cancel_booking_remote 테스트
+# ─────────────────────────────────────────────────────────────
+
+class TestCancelBookingRemote:
+    """cancel_booking_remote() 단위 테스트."""
+
+    def test_disabled_returns_none(self):
+        """API 키 미설정 → None."""
+        with patch.dict(os.environ, {}, clear=True):
+            env = {k: v for k, v in os.environ.items() if k != "CALCOM_API_KEY"}
+            with patch.dict(os.environ, env, clear=True):
+                assert calcom_client.cancel_booking_remote("abc-123") is None
+
+    def test_empty_uid_returns_none(self):
+        """빈 uid → None."""
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            assert calcom_client.cancel_booking_remote("") is None
+
+    def test_success_200_returns_true(self):
+        """200 성공 → True."""
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.delete", return_value=_mock_response(200, {"status": "success"})):
+                assert calcom_client.cancel_booking_remote("abc-123") is True
+
+    def test_success_204_returns_true(self):
+        """204 No Content → True."""
+        mock = MagicMock()
+        mock.status_code = 204
+        mock.raise_for_status.return_value = None
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.delete", return_value=mock):
+                assert calcom_client.cancel_booking_remote("abc-123") is True
+
+    def test_404_returns_true(self):
+        """404 Not Found (이미 삭제됨) → True."""
+        mock = _mock_response(404, {"error": "not found"})
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.delete", return_value=mock):
+                assert calcom_client.cancel_booking_remote("abc-123") is True
+
+    def test_timeout_returns_none(self):
+        """타임아웃 → None."""
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.delete", side_effect=requests.Timeout("timeout")):
+                assert calcom_client.cancel_booking_remote("abc-123") is None
+
+    def test_500_returns_none(self):
+        """서버 오류 → None."""
+        with patch.dict(os.environ, ENV_WITH_KEY, clear=False):
+            with patch("requests.delete", return_value=_mock_response(500, {"error": "server"})):
+                assert calcom_client.cancel_booking_remote("abc-123") is None

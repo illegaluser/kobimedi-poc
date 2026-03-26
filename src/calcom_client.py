@@ -241,3 +241,82 @@ def create_booking(
     except Exception as exc:  # noqa: BLE001
         logger.error("AGENT_HARD_FAIL: cal.com create_booking unexpected error: %s", exc)
         return None
+
+
+def list_bookings() -> Optional[list[dict]]:
+    """
+    cal.com GET /bookings API를 호출해 전체 예약 목록을 반환한다.
+
+    Returns
+    -------
+    list[dict]
+        예약 목록 (각 항목에 id, uid, title, start, end, status 등 포함)
+    None
+        API 비활성 또는 네트워크/타임아웃 오류
+    """
+    if not _api_key():
+        return None
+
+    url = f"{CALCOM_BASE_URL}/bookings"
+    headers = _common_headers("2024-08-13")
+    params = {"status": "upcoming"}
+
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        bookings = data.get("data", data)
+        return bookings if isinstance(bookings, list) else []
+
+    except requests.Timeout:
+        logger.error("cal.com list_bookings timeout")
+        return None
+    except requests.RequestException as exc:
+        logger.error("cal.com list_bookings request error: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.error("cal.com list_bookings unexpected error: %s", exc)
+        return None
+
+
+def cancel_booking_remote(booking_uid: str) -> Optional[bool]:
+    """
+    cal.com DELETE /bookings/{uid}/cancel API를 호출해 원격 예약을 취소한다.
+
+    Returns
+    -------
+    True
+        취소 성공 또는 이미 취소된 상태
+    None
+        API 비활성 또는 네트워크/타임아웃 오류
+    """
+    if not _api_key():
+        return None
+    if not booking_uid:
+        return None
+
+    url = f"{CALCOM_BASE_URL}/bookings/{booking_uid}/cancel"
+    headers = _common_headers("2024-08-13")
+
+    try:
+        response = requests.delete(url, headers=headers, timeout=10)
+
+        if response.status_code in (200, 204):
+            return True
+
+        if response.status_code == 404:
+            logger.warning("cal.com cancel_booking 404: uid=%s (이미 삭제됨)", booking_uid)
+            return True
+
+        response.raise_for_status()
+        return True
+
+    except requests.Timeout:
+        logger.error("cal.com cancel_booking timeout: uid=%s", booking_uid)
+        return None
+    except requests.RequestException as exc:
+        logger.error("cal.com cancel_booking request error: %s", exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.error("cal.com cancel_booking unexpected error: %s", exc)
+        return None
