@@ -32,7 +32,7 @@ kobimedi-poc/
 │   ├── models.py            # 데이터 모델 (Action, Booking, Ticket 등)
 │   └── metrics.py           # KPI 이벤트 기록
 ├── scripts/                 # 운영 스크립트
-├── tests/                   # 테스트 (유닛 + E2E + 시나리오)
+├── tests/                   # 유닛 테스트 (226개, Mock 기반)
 ├── data/
 │   ├── tickets.json         # 입력 티켓 50건
 │   └── bookings.json        # 예약 저장소 (진실원천)
@@ -43,7 +43,7 @@ kobimedi-poc/
     ├── architecture.md          # 에이전트 아키텍처 설계 문서
     ├── policy_digest.md         # 진료 예약 정책 요약
     ├── demo_evidence.md         # 인터랙티브 데모 증빙
-    ├── test_scenarios.md        # 테스트 시나리오 명세 (유닛 51 + E2E 28)
+    ├── test_scenarios.md        # 테스트 시나리오 명세 (51개, 9개 카테고리)
     ├── test_results_unit.txt    # 유닛 테스트 실행 결과
     └── test_results_scenario.txt # 시나리오 테스트 실행 결과
 ```
@@ -280,7 +280,7 @@ python scripts/cleanup_bookings.py --local-only
 
 모든 시나리오의 사용자 발화, 실행 의도, 기대 결과는 아래 문서에 정리되어 있다.
 
-- [docs/test_scenarios.md](docs/test_scenarios.md) — 유닛 51개 + E2E 28개 + 비교표
+- [docs/test_scenarios.md](docs/test_scenarios.md) — 51개 시나리오 명세 (9개 카테고리)
 
 ## 도메인 정보
 
