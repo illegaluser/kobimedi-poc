@@ -428,7 +428,7 @@ pytest tests/ -v    # 약 9초, 226 passed
 | `test_generalization.py` | 3 | 일반화 (한국어 인젝션, 혼합 요청, 모호한 환자 유형) |
 | `test_batch.py` | 1 | 배치 모드 (run.py 출력 JSON 스키마 + KPI 메트릭) |
 
-### 시나리오 테스트 (51개)
+### [시나리오 테스트 (51개)](docs/test_scenarios.md)
 
 실제 Ollama LLM과 Cal.com API를 호출하여 **사용자 발화 → 챗봇 응답 → 상태 전이**의 대화 흐름 전체를 검증합니다. LLM 모델 변경이나 프롬프트 수정 후 **실제 동작 품질을 확인하는 용도**입니다.
 
@@ -453,8 +453,6 @@ python scripts/run_scenario_tests.py --policy-only
 | 7 | 운영시간 정책 | 12 | X | 점심시간, 토요일, 일요일, 09시 전, 18시 후 |
 | 8 | 대화 상태 관리 | 3 | O | 4회 clarify 에스컬레이션, 누적 슬롯 유지 |
 | 9 | Cal.com 외부 연동 | 8 | O | 서버 장애, Race Condition, Graceful Degradation |
-
-상세 시나리오 명세: [docs/test_scenarios.md](docs/test_scenarios.md)
 
 ### 통합 실행
 
