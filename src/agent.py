@@ -1125,6 +1125,15 @@ def _determine_dialogue_missing_info(
         if not slots.get("time"):
             missing.append("time")
 
+    if action == "modify_appointment":
+        if not slots.get("date") and not slots.get("time"):
+            missing.append("date")
+            missing.append("time")
+        elif not slots.get("date"):
+            missing.append("date")
+        elif not slots.get("time"):
+            missing.append("time")
+
     if not customer_name and patient_name and is_proxy_booking is False:
         customer_name = patient_name
 

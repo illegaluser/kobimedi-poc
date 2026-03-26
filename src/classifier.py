@@ -214,6 +214,7 @@ DATE_HINT_PATTERNS = [
     r"(월|화|수|목|금|토|일)요일",
     r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}",
     r"\d{1,2}[-/.]\d{1,2}",
+    r"\d{1,2}\s*월\s*\d{1,2}\s*일",
 ]
 
 TIME_HINT_PATTERNS = [
@@ -583,6 +584,7 @@ def _is_booking_related(text: str) -> bool:
     return any(keyword in text for keyword in [
         "예약", "진료", "접수", "변경", "취소", "확인",
         "분과", "진료과",
+        "바꿔", "옮겨", "수정",
     ])
 
 
@@ -706,6 +708,20 @@ def _extract_date_from_text(text: str, now: datetime) -> str | None:
     weekday_date = _parse_weekday_date(text, now)
     if weekday_date:
         return weekday_date
+    # "4월 1일", "4월1일" 등 한글 날짜 형식
+    korean_md_match = re.search(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일", text)
+    if korean_md_match:
+        month, day = int(korean_md_match.group(1)), int(korean_md_match.group(2))
+        try:
+            candidate = datetime(now.year, month, day, tzinfo=now.tzinfo).date()
+        except ValueError:
+            return None
+        if candidate < now.date():
+            try:
+                candidate = datetime(now.year + 1, month, day, tzinfo=now.tzinfo).date()
+            except ValueError:
+                return None
+        return candidate.isoformat()
     month_day_match = re.search(r"(\d{1,2})[-/.](\d{1,2})", text)
     if month_day_match:
         month, day = map(int, month_day_match.groups())
