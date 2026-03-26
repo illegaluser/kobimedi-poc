@@ -19,6 +19,7 @@ from .response_builder import (
     build_success_message,
 )
 from .storage import (
+    cancel_booking,
     create_booking,
     find_bookings,
     load_bookings,
@@ -1465,6 +1466,8 @@ def _handle_pending_confirmation(
                         intent_result={"action": "book_appointment", "department": dept},
                         customer_type=customer_type,
                     )
+                elif isinstance(cc_result, dict) and cc_result.get("uid"):
+                    appointment["calcom_uid"] = cc_result["uid"]
             try:
                 persisted_booking = create_booking(appointment)
             except Exception:
@@ -1700,8 +1703,14 @@ def process_ticket(
 
     action = intent_result.get("action")
     inferred_action = _infer_requested_action(user_message)
+
+    # 예약 진행 중(pending_action)에 LLM이 escalate/reject를 반환하면
+    # 대화 이력의 증상 표현 때문이므로 pending_action으로 복원
+    pending_action = (state or {}).get("pending_action")
+    if action in {"escalate", "reject"} and pending_action in BOOKING_RELATED_ACTIONS:
+        action = pending_action
+
     if action == "clarify":
-        pending_action = (state or {}).get("pending_action")
         has_booking_slots = any(intent_result.get(key) for key in ["department", "date", "time"])
         if pending_action:
             action = pending_action
@@ -1801,7 +1810,8 @@ def process_ticket(
 
         # ── Position 1: cal.com 선제적 슬롯 안내 (동선 1.3) ──
         # 분과+날짜는 있지만 시간만 누락된 경우, cal.com에서 가용 시간을 조회하여 안내
-        clarify_message = build_missing_info_question(dialogue_missing_info, department=department, action_context=action)
+        _resolved_ct = (history_resolution or {}).get("customer_type")
+        clarify_message = build_missing_info_question(dialogue_missing_info, department=department, action_context=action, customer_type=_resolved_ct)
         if (
             "time" in dialogue_missing_info
             and action == "book_appointment"
@@ -2157,6 +2167,10 @@ def process_ticket(
                         customer_type=customer_type,
                     )
 
+            # Cal.com UID 저장
+            if isinstance(locals().get("cc_result"), dict) and cc_result.get("uid"):
+                appointment["calcom_uid"] = cc_result["uid"]
+
             # 배치 모드: 확인 없이 즉시 예약 결정 (cal.com 비활성 또는 성공)
             # 로컬 영속화 (bookings.json = source of truth)
             try:
@@ -2191,6 +2205,22 @@ def process_ticket(
                 policy_result={"allowed": True},
                 customer_type=customer_type,
             )
+
+    # ── 예약 취소 실행: 로컬 Storage + Cal.com 원격 취소 ──
+    if action == "cancel_appointment" and target_existing_appointment:
+        booking_id = target_existing_appointment.get("id")
+        if booking_id:
+            try:
+                cancel_booking(booking_id)
+            except Exception:
+                logger.debug("로컬 예약 취소 실패: %s", booking_id)
+        # Cal.com 원격 취소
+        calcom_uid = target_existing_appointment.get("calcom_uid") or target_existing_appointment.get("uid")
+        if calcom_uid and calcom_client.is_calcom_enabled(target_existing_appointment.get("department", "")):
+            try:
+                calcom_client.cancel_booking_remote(calcom_uid)
+            except Exception:
+                logger.debug("Cal.com 원격 취소 실패: uid=%s", calcom_uid)
 
     success_reference = target_existing_appointment or {
         "department": department,

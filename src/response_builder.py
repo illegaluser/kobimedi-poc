@@ -112,6 +112,7 @@ def build_missing_info_question(
     *,
     department: str | None = None,
     action_context: str | None = None,
+    customer_type: str | None = None,
 ) -> str:
     missing_fields = missing_fields or []
     primary = missing_fields[0] if missing_fields else None
@@ -166,9 +167,14 @@ def build_missing_info_question(
     if primary == "department":
         return "어느 분과로 예약할까요? 현재 예약 가능한 분과는 이비인후과, 내과, 정형외과입니다."
     if primary == "date":
-        return f"{department}로 예약을 도와드릴게요. 원하시는 날짜를 알려주세요." if department else "원하시는 날짜를 알려주세요."
+        _duration_hint = " (초진 40분 / 재진 30분)" if action_context == "book_appointment" else ""
+        prefix = f"{department}로 예약을 도와드릴게요." if department else ""
+        return f"{prefix} 원하시는 날짜와 시간을 알려주세요.{_duration_hint}".strip()
     if primary == "time":
-        return f"{department}로 예약을 도와드릴게요. 몇 시를 원하시나요?" if department else "원하시는 시간을 알려주세요."
+        is_first = customer_type not in ("재진", "revisit")
+        _duration_info = "초진 환자는 40분" if is_first else "재진 환자는 30분"
+        prefix = f"{department}로 예약을 도와드릴게요." if department else ""
+        return f"{prefix} {_duration_info} 진료 소요됩니다. 원하시는 시간을 알려주세요. (운영: 평일 09~18시, 토 09~13시)".strip()
     if primary == "appointment_target":
         if action_context == "cancel_appointment":
             return "어떤 예약을 취소할지 날짜, 시간 또는 분과를 알려주세요."

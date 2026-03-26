@@ -14,6 +14,10 @@
 | `c1c8d94` | customer_name=None일 때 이름 미수집 | 실제 이름 존재 시에만 질문 스킵 |
 | `1643328` | "필요해"/"죽을것" 등이 환자이름으로 오추출 | `_NON_NAME_WORDS` + 동사 활용형 패턴 보강 |
 | `19bbf66` | LLM escalate/reject 시 response=None | policy 호출 전 early return + 안내 메시지 추가 |
+| 이번 커밋 | 예약 진행 중 LLM이 맥락 없이 escalate 반환 | pending_action이 booking 관련이면 escalate/reject 무시하고 복원 |
+| 이번 커밋 | 초진/재진 진료시간 사전 안내 없음 | 시간 선택 질문에 "초진 40분/재진 30분" 안내 추가 |
+| 이번 커밋 | 예약 취소 시 Cal.com 원격 취소 미실행 | cancel_booking(로컬) + cancel_booking_remote(Cal.com) 호출 추가 |
+| 이번 커밋 | Cal.com 예약 UID가 로컬에 미저장 | 예약 생성 시 calcom_uid를 appointment에 저장 |
 
 ### 신규 스크립트
 

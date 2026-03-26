@@ -146,7 +146,7 @@ def test_mixed_medical_and_booking_request_rejects_medical_part_and_continues_bo
     assert result["action"] == "clarify"
     assert result["department"] == "내과"
     assert "의료 상담" in result["response"]
-    assert "몇 시를 원하시나요" in result["response"]
+    assert "시간" in result["response"]
     mock_classify_intent.assert_called_once_with("내일 내과 예약하고 싶어요")
     mock_apply_policy.assert_not_called()
 
