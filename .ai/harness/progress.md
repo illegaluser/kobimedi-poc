@@ -19,6 +19,7 @@
 | 이번 커밋 | 예약 취소 시 Cal.com 원격 취소 미실행 | cancel_booking(로컬) + cancel_booking_remote(Cal.com) 호출 추가 |
 | 이번 커밋 | Cal.com 예약 UID가 로컬에 미저장 | 예약 생성 시 calcom_uid를 appointment에 저장 |
 | `dd96589` 이후 | 예약 변경 시 로컬/Cal.com 모두 미반영 | 기존 취소(로컬+Cal.com) + 신규 생성(로컬+Cal.com) 구현 |
+| 이번 커밋 | 예약 확인/변경/취소 시 Cal.com 예약 조회 불가 | _find_customer_appointments에 Cal.com list_bookings 폴백 추가 |
 
 ### 신규 스크립트
 

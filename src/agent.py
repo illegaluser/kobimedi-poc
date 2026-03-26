@@ -1340,6 +1340,55 @@ def _load_storage_appointments(customer_name: str | None, birth_date: str | None
         return []
 
 
+_CALCOM_SLUG_TO_DEPT: dict[str, str] = {
+    "ent": "이비인후과",
+    "internal": "내과",
+    "orthopedics": "정형외과",
+}
+
+
+def _convert_calcom_booking_to_local(cb: dict) -> dict | None:
+    """Cal.com 예약을 로컬 appointment 형식으로 변환한다."""
+    attendees = cb.get("attendees", [])
+    if not attendees:
+        return None
+    att = attendees[0]
+    email = att.get("email", "")
+    # 전화번호 추출: "01098765432@kobimedi.local" → "010-9876-5432"
+    phone_raw = email.split("@")[0] if "@kobimedi.local" in email else ""
+    if len(phone_raw) >= 10:
+        phone = f"{phone_raw[:3]}-{phone_raw[3:7]}-{phone_raw[7:]}"
+    else:
+        phone = phone_raw
+
+    start_utc = cb.get("start", "")
+    # UTC → KST (UTC+9)
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        utc_dt = _dt.fromisoformat(start_utc.replace("Z", "+00:00"))
+        kst_dt = utc_dt + _td(hours=9)
+        date_str = kst_dt.strftime("%Y-%m-%d")
+        time_str = kst_dt.strftime("%H:%M")
+    except Exception:
+        date_str = None
+        time_str = None
+
+    slug = (cb.get("eventType") or {}).get("slug", "")
+    department = _CALCOM_SLUG_TO_DEPT.get(slug, slug)
+
+    return {
+        "id": str(cb.get("id", "")),
+        "calcom_uid": cb.get("uid"),
+        "patient_name": att.get("name"),
+        "patient_contact": phone,
+        "department": department,
+        "date": date_str,
+        "time": time_str,
+        "booking_time": f"{date_str}T{time_str}:00+09:00" if date_str and time_str else None,
+        "status": "active" if cb.get("status") == "accepted" else cb.get("status"),
+    }
+
+
 def _find_customer_appointments(ticket: dict, all_appointments: list[dict], existing_appointment: dict | None) -> list[dict]:
     customer_name = ticket.get("customer_name")
     patient_name = ticket.get("patient_name") or customer_name
@@ -1373,6 +1422,23 @@ def _find_customer_appointments(ticket: dict, all_appointments: list[dict], exis
     merged_matches = _merge_appointment_sources(storage_matches, matches)
     if merged_matches:
         return merged_matches
+
+    # 로컬에 없으면 Cal.com에서 조회 (폴백)
+    if patient_contact:
+        phone_digits = patient_contact.replace("-", "")
+        try:
+            calcom_bookings = calcom_client.list_bookings() or []
+            for cb in calcom_bookings:
+                for att in cb.get("attendees", []):
+                    if phone_digits in (att.get("email", "") or ""):
+                        converted = _convert_calcom_booking_to_local(cb)
+                        if converted and converted.get("status") == "active":
+                            matches.append(converted)
+                        break
+        except Exception:
+            pass
+    if matches:
+        return matches
 
     if existing_appointment:
         return [existing_appointment]
