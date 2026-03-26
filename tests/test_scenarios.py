@@ -28,6 +28,7 @@ from src import calcom_client
 from src.classifier import safety_check
 from src.models import Action, Booking, PolicyResult, Ticket, User
 from src.policy import apply_policy, is_change_or_cancel_allowed, is_slot_available, is_within_operating_hours
+from src.storage import find_bookings, DEFAULT_BOOKINGS_PATH
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1591,12 +1592,11 @@ _BOOKED_BMC = {
 }
 
 
-def _run_book_with_calcom(mock_safety, mock_intent, mock_policy, mock_resolve, mock_create):
+def _run_book_with_calcom(mock_safety, mock_intent, mock_policy, mock_resolve, storage_path):
     mock_safety.return_value = SAFE_RESULT
     mock_intent.side_effect = _bmc_intent("book_appointment")
     mock_policy.return_value = PolicyResult(action=Action.BOOK_APPOINTMENT)
     mock_resolve.return_value = _resolve_revisit()
-    mock_create.return_value = dict(_BOOKED_BMC)
 
     ss = {}
     tb = {"customer_name": "김민수", "customer_type": "재진"}
@@ -1612,8 +1612,11 @@ def _run_book_with_calcom(mock_safety, mock_intent, mock_policy, mock_resolve, m
     r = process_ticket({"message": "네"},
                        all_appointments=[], existing_appointment=None, session_state=ss, now=REFERENCE_NOW)
     assert r["action"] == "book_appointment"
-    mock_create.assert_called_once()
-    return ss
+
+    # 실제 storage에서 생성된 예약을 읽어서 반환
+    bookings = find_bookings(path=storage_path)
+    assert len(bookings) == 1, f"Phase 1 후 예약 1건 기대, 실제 {len(bookings)}건"
+    return ss, bookings[0]
 
 
 class TestBookModifyCancelFlow:
@@ -1623,23 +1626,25 @@ class TestBookModifyCancelFlow:
         "modify_req,modify_slot,new_date,new_time,cancel_req",
         [pytest.param(*s, id=f"10-{i+1}") for i, s in enumerate(_BMC_SCENARIOS)],
     )
-    @patch("src.agent.cancel_booking", return_value=True)
-    @patch("src.agent.create_booking")
     @patch("src.agent.resolve_customer_type_from_history")
     @patch("src.agent.apply_policy")
     @patch("src.agent.classify_intent")
     @patch("src.agent.classify_safety")
     def test_full_flow(
-        self, mock_safety, mock_intent, mock_policy, mock_resolve, mock_create, mock_cancel,
+        self, mock_safety, mock_intent, mock_policy, mock_resolve,
         modify_req, modify_slot, new_date, new_time, cancel_req,
+        tmp_path,
     ):
+        storage_path = tmp_path / "bookings.json"
+
         # ── Phase 1: 예약 (Cal.com 슬롯 검증 포함) ──
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False), \
+             patch("src.storage.DEFAULT_BOOKINGS_PATH", storage_path), \
              patch("src.calcom_client.get_available_slots", return_value=["14:00", "15:00"]), \
              patch("src.calcom_client.create_booking", return_value={"uid": "calcom-001"}):
-            ss = _run_book_with_calcom(mock_safety, mock_intent, mock_policy, mock_resolve, mock_create)
+            ss, booked = _run_book_with_calcom(
+                mock_safety, mock_intent, mock_policy, mock_resolve, storage_path)
 
-        booked = dict(_BOOKED_BMC)
         all_appts = [booked]
 
         # ── Phase 2: 변경 (Cal.com 슬롯 교차 검증) ──
@@ -1647,6 +1652,7 @@ class TestBookModifyCancelFlow:
         mock_policy.return_value = PolicyResult(action=Action.MODIFY_APPOINTMENT)
 
         with patch.dict(os.environ, ENV_WITH_KEY, clear=False), \
+             patch("src.storage.DEFAULT_BOOKINGS_PATH", storage_path), \
              patch("src.calcom_client.get_available_slots", return_value=[new_time]), \
              patch("src.calcom_client.cancel_booking_remote", return_value=True), \
              patch("src.calcom_client.create_booking", return_value={"uid": "calcom-002"}):
@@ -1672,29 +1678,43 @@ class TestBookModifyCancelFlow:
             f"변경 완료 기대했으나 action={r['action']}, response={r['response']}")
         assert "변경" in r["response"]
 
-        booked["date"], booked["time"] = new_date, new_time
-        booked["booking_time"] = f"{new_date}T{new_time}:00+00:00"
+        # 실제 storage에서 변경 후 상태 검증: 기존 예약 cancelled, 신규 예약 active
+        old_cancelled = find_bookings(filters={"id": booked["id"], "status": "cancelled"},
+                                      path=storage_path, include_cancelled=True)
+        assert old_cancelled, "변경 후 기존 예약이 cancelled 상태여야 함"
+
+        new_bookings = find_bookings(path=storage_path)
+        assert len(new_bookings) == 1, f"변경 후 active 예약 1건 기대, 실제 {len(new_bookings)}건"
+        modified_booking = new_bookings[0]
+        assert modified_booking["date"] == new_date
+        assert modified_booking["time"] == new_time
+
+        all_appts = [modified_booking]
 
         # ── Phase 3: 취소 ──
         mock_intent.side_effect = _bmc_intent("cancel_appointment", date=new_date, time=new_time)
         mock_policy.return_value = PolicyResult(action=Action.CANCEL_APPOINTMENT)
 
-        with patch("src.calcom_client.cancel_booking_remote", return_value=True):
+        with patch("src.storage.DEFAULT_BOOKINGS_PATH", storage_path):
             r = process_ticket({"message": cancel_req}, all_appointments=all_appts,
-                               existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+                               existing_appointment=modified_booking, session_state=ss, now=REFERENCE_NOW)
 
             max_turns = 5
             while r["action"] == "clarify" and max_turns > 0:
                 max_turns -= 1
                 if "본인이신가요" in r["response"]:
                     r = process_ticket({"message": "본인"}, all_appointments=all_appts,
-                                       existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+                                       existing_appointment=modified_booking, session_state=ss, now=REFERENCE_NOW)
                 elif "연락처" in r["response"] or "성함" in r["response"]:
                     r = process_ticket({"message": "김민수 010-1234-5678"}, all_appointments=all_appts,
-                                       existing_appointment=booked, session_state=ss, now=REFERENCE_NOW)
+                                       existing_appointment=modified_booking, session_state=ss, now=REFERENCE_NOW)
                 else:
                     break
 
         assert r["action"] == "cancel_appointment", (
             f"취소 완료 기대했으나 action={r['action']}, response={r['response']}")
         assert "취소" in r["response"]
+
+        # 실제 storage에서 취소 후 상태 검증: active 예약 0건
+        remaining = find_bookings(path=storage_path)
+        assert len(remaining) == 0, f"취소 후 active 예약 0건 기대, 실제 {len(remaining)}건"
