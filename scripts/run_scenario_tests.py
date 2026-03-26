@@ -780,11 +780,17 @@ def run_category_9():
 
 def run_category_10():
     R.log("\n━━━ Category 10: 예약→변경→취소 전체 플로우 ━━━")
-    if not OLLAMA_OK:
-        R.log("  [SKIP] Ollama 미구동")
+    if not OLLAMA_OK or not CALCOM_OK:
+        missing = []
+        if not OLLAMA_OK:
+            missing.append("Ollama")
+        if not CALCOM_OK:
+            missing.append("Cal.com")
+        R.log(f"  [SKIP] {', '.join(missing)} 미가용")
         for _ in range(10):
             _scenario_result(False, skip=True)
         return
+    R.log(f"  Cal.com 연동 활성 — 실제 슬롯 조회 + 예약 생성/취소 경로 검증")
 
     future_date = (datetime.now() + timedelta(days=14)).strftime("%Y-%m-%d")
     future_display = (datetime.now() + timedelta(days=14)).strftime("%-m월 %-d일")
