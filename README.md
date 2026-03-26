@@ -51,7 +51,7 @@
 예약이 완료되었습니다!
 ```
 
-**모드 2: 배치 처리** (`python run.py --input tickets.json --output results.json`) — CS 티켓 50건을 입력받아 각 티켓의 의도 분류 + 응답을 JSON으로 출력합니다.
+**모드 2: 배치 처리** (`python run.py --input tickets.json --output results.json`) — tickets.json에 포함된 CS 티켓을 한 번에 처리하여 각 티켓의 의도 분류 + 응답을 JSON으로 출력합니다. 과제에서 제공된 샘플은 50건이지만, 티켓 수에 제한은 없습니다.
 
 ```json
 {
@@ -357,7 +357,7 @@ python chat.py
 > (여기에 메시지 입력)
 ```
 
-**배치 처리** — CS 티켓 50건을 한 번에 처리하여 JSON 결과를 생성합니다:
+**배치 처리** — tickets.json에 포함된 티켓을 한 번에 처리하여 JSON 결과를 생성합니다 (티켓 수 제한 없음):
 
 ```bash
 python run.py --input data/tickets.json --output results.json
@@ -528,7 +528,7 @@ kobimedi-poc/
 ├── scripts/                     # 운영 스크립트
 ├── tests/                       # 유닛 테스트 (226개)
 ├── data/
-│   ├── tickets.json             # 입력 티켓 50건
+│   ├── tickets.json             # 입력 티켓 (과제 샘플 50건, 추가 가능)
 │   └── bookings.json            # 예약 저장소 (진실원천)
 └── docs/
     ├── final_report.md          # 최종 리포트 (Q1~Q4)
