@@ -20,6 +20,7 @@
 | 이번 커밋 | Cal.com 예약 UID가 로컬에 미저장 | 예약 생성 시 calcom_uid를 appointment에 저장 |
 | `dd96589` 이후 | 예약 변경 시 로컬/Cal.com 모두 미반영 | 기존 취소(로컬+Cal.com) + 신규 생성(로컬+Cal.com) 구현 |
 | 이번 커밋 | 예약 확인/변경/취소 시 Cal.com 예약 조회 불가 | _find_customer_appointments에 Cal.com list_bookings 폴백 추가 |
+| 이번 커밋 | Cal.com 연동 E2E 검증 스크립트 없음 | verify_calcom_lifecycle.py: 예약→Cal.com확인→변경→확인→취소→확인 6단계 검증 |
 
 ### 신규 스크립트
 
