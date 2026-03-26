@@ -45,7 +45,6 @@ kobimedi-poc/
     ├── demo_evidence.md         # 인터랙티브 데모 증빙
     ├── test_scenarios.md        # 테스트 시나리오 명세 (유닛 51 + E2E 28)
     ├── test_results_unit.txt    # 유닛 테스트 실행 결과
-    ├── test_results_e2e.txt     # E2E 테스트 실행 결과
     └── test_results_scenario.txt # 시나리오 테스트 실행 결과
 ```
 
@@ -173,21 +172,19 @@ run.py  ──┘         │
 
 ### `scripts/run_tests.sh` — 테스트 실행기
 
-유닛 테스트, E2E 테스트, 시나리오 테스트를 선택적으로 실행하고 결과 파일을 자동 생성한다.
+유닛 테스트와 시나리오 테스트를 선택적으로 실행하고 결과 파일을 자동 생성한다.
 
 ```bash
-./scripts/run_tests.sh              # 유닛 테스트만 (214개, ~9초)
-./scripts/run_tests.sh --e2e        # E2E 테스트만 (28개, ~70초)
+./scripts/run_tests.sh              # 유닛 테스트만 (~9초)
 ./scripts/run_tests.sh --scenario   # 시나리오 테스트만 (51개, ~80초)
-./scripts/run_tests.sh --all        # 전체 (유닛 + E2E + 시나리오)
+./scripts/run_tests.sh --all        # 유닛 + 시나리오 전체
 ```
 
 | 옵션 | 대상 | 결과 파일 |
 |------|------|----------|
-| (기본) | 유닛 테스트 214개 | `docs/test_results_unit.txt` |
-| `--e2e` | E2E 28개 (Ollama + Cal.com 실제 호출) | `docs/test_results_e2e.txt` |
-| `--scenario` | 시나리오 51개 (9개 카테고리) | `docs/test_results_scenario.txt` |
-| `--all` | 위 전체 | 3개 파일 모두 |
+| (기본) | 유닛 테스트 | `docs/test_results_unit.txt` |
+| `--scenario` | 시나리오 테스트 51개 (실제 Ollama + Cal.com) | `docs/test_results_scenario.txt` |
+| `--all` | 위 전체 | 2개 파일 모두 |
 
 ### `scripts/run_scenario_tests.py` — 시나리오 테스트 러너
 
@@ -247,14 +244,13 @@ python scripts/cleanup_bookings.py --local-only
 
 ### 테스트 파일 목록
 
-총 11개 테스트 파일, **254개 테스트** (유닛 226 + E2E 28).
+총 10개 테스트 파일, **226개 유닛 테스트** + 시나리오 러너 51개.
 
 | 파일 | 테스트 수 | 검증 대상 |
 |------|----------|----------|
 | `tests/test_scenarios.py` | 51 | 9개 카테고리 시나리오 (Happy Path, Identity, Policy, 24h, Safety, Department, Operating Hours, Dialogue, Cal.com) |
 | `tests/test_calcom.py` | 51 | Cal.com API 연동 (슬롯 조회, 예약 생성, 취소, Race Condition, Graceful Degradation) |
 | `tests/test_safety.py` | 35 | Safety gate (의료 상담 차단, 인젝션 방어, 증상 안내, 혼합 요청 분리, LLM 폴백) |
-| `tests/test_e2e.py` | 28 | 실제 Ollama + Cal.com E2E (Mock 없음, `pytest.mark.e2e`) |
 | `tests/test_response_builder.py` | 27 | 응답 메시지 생성 (proxy 질문, 이름/연락처 수집, 분과/시간 안내) |
 | `tests/test_classifier.py` | 20 | 의도 분류 (LLM 파싱, 에러 복구, 의사→분과 매핑, 증상→분과 매핑) |
 | `tests/test_policy.py` | 14 | 정책 엔진 (슬롯 겹침, 정원, 24시간 룰, 대안 슬롯, 초진/재진 시간) |
@@ -268,14 +264,9 @@ python scripts/cleanup_bookings.py --local-only
 | 레벨 | 설명 | LLM | 속도 |
 |------|------|-----|------|
 | **유닛 테스트** (226개) | Mock 기반, 각 컴포넌트 격리 검증 | Mock | ~9초 |
-| **시나리오 테스트** (51+28개) | 실제 Ollama + Cal.com + Storage, 대화 흐름 검증 | 실제 호출 | ~80초 |
+| **시나리오 테스트** (51개) | 실제 Ollama + Cal.com + Storage, 대화 흐름 검증 | 실제 호출 | ~80초 |
 
-시나리오 테스트는 두 가지 인터페이스로 실행할 수 있다.
-
-| 인터페이스 | 실행 방법 | 출력 형식 | 용도 |
-|-----------|----------|----------|------|
-| 시나리오 러너 (51개) | `python scripts/run_scenario_tests.py` | 턴별 대화 로그 + 상세 리포트 | 데모, 검수, 디버깅 |
-| pytest E2E (28개) | `pytest tests/test_e2e.py -m e2e` | PASS/FAIL | CI 자동 회귀 판정 |
+시나리오 테스트는 `scripts/run_scenario_tests.py`로 실행하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력한다. exit code로 PASS/FAIL을 판정하므로 CI에서도 사용 가능하다.
 
 ### 실행 환경 요구 사항
 

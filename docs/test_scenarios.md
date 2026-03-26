@@ -209,16 +209,11 @@ Turn 2: "네"
 | 레벨 | 설명 | LLM / Storage / Cal.com | 속도 |
 |------|------|------------------------|------|
 | **유닛 테스트** (226개) | Mock 기반, 각 컴포넌트 격리 검증 | 모두 Mock | ~9초 |
-| **시나리오 테스트** (51+28개) | 실제 Ollama + Cal.com + Storage로 대화 흐름 검증 | 모두 실제 호출 | ~80초 |
+| **시나리오 테스트** (51개) | 실제 Ollama + Cal.com + Storage로 대화 흐름 검증 | 모두 실제 호출 | ~80초 |
 
 **유닛 테스트** — 각 컴포넌트(Safety, Policy, Storage, Cal.com)가 올바르게 연결되는지 **격리 검증**한다. 코드 수정 후 빠른 회귀를 잡는 용도.
 
-**시나리오 테스트** — 시나리오 명세의 사용자 발화를 실제 LLM에 입력하여 **대화 흐름 전체를 검증**한다. 두 가지 인터페이스로 실행 가능:
-
-| 인터페이스 | 파일 | 실행 방법 | 출력 형식 | 용도 |
-|-----------|------|----------|----------|------|
-| 시나리오 러너 (51개) | `scripts/run_scenario_tests.py` | `python scripts/run_scenario_tests.py` | 턴별 대화 로그 + 상세 리포트 | 데모, 검수, 디버깅 |
-| pytest E2E (28개) | `tests/test_e2e.py` | `pytest tests/test_e2e.py -m e2e` | PASS/FAIL | CI 자동 회귀 판정 |
+**시나리오 테스트** — 시나리오 명세의 사용자 발화를 실제 LLM에 입력하여 **대화 흐름 전체를 검증**한다. `scripts/run_scenario_tests.py`로 실행하며, 각 턴마다 사용자 발화 → 챗봇 응답 → action → 상태 변화를 상세히 출력한다. exit code로 PASS/FAIL을 판정하므로 CI에서도 사용 가능하다.
 
 **언제 무엇을 쓰는가:**
 
@@ -262,8 +257,8 @@ pytest tests/ -v
 
 # Part 2: 시나리오 테스트 (실제 LLM + Cal.com)
 
-> **시나리오 러너:** `scripts/run_scenario_tests.py` (51개, 상세 리포트)
-> **pytest E2E:** `tests/test_e2e.py` (28개, CI 자동 판정)
+> **테스트 파일:** `scripts/run_scenario_tests.py`
+> **총 테스트 수:** 51개 (9개 카테고리)
 > **실행 시간:** ~80초 (Ollama LLM + Cal.com 실제 호출)
 
 Part 1(유닛 테스트)과의 차이:
@@ -280,13 +275,13 @@ Part 1(유닛 테스트)과의 차이:
 ## 실행 방법
 
 ```bash
-# 시나리오 러너 (상세 리포트)
+# 시나리오 테스트 (실제 LLM + Cal.com)
 python scripts/run_scenario_tests.py
 
-# pytest E2E (CI 자동 판정)
-export $(grep -v '^#' .env | xargs) && pytest tests/test_e2e.py -v -m e2e -o "addopts="
+# 특정 카테고리만
+python scripts/run_scenario_tests.py --category 5
 
-# 유닛 테스트만 (기본값, 시나리오 테스트 자동 제외)
+# 유닛 테스트만
 pytest tests/ -v
 
 # 환경 미충족 시 자동 skip (Ollama 미구동 또는 Cal.com 키 미설정)

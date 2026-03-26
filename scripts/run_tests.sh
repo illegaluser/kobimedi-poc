@@ -4,13 +4,11 @@
 #
 # 사용법:
 #   ./scripts/run_tests.sh              # 유닛 테스트만 (기본)
-#   ./scripts/run_tests.sh --e2e        # E2E 테스트만
 #   ./scripts/run_tests.sh --scenario   # 시나리오 테스트만 (9개 카테고리)
-#   ./scripts/run_tests.sh --all        # 유닛 + E2E + 시나리오 전체
+#   ./scripts/run_tests.sh --all        # 유닛 + 시나리오 전체
 #
 # 결과 파일:
 #   docs/test_results_unit.txt
-#   docs/test_results_e2e.txt
 #   docs/test_results_scenario.txt
 # ---------------------------------------------------------------
 set -euo pipefail
@@ -20,7 +18,6 @@ source .venv/bin/activate 2>/dev/null || true
 
 RESULTS_DIR="docs"
 UNIT_RESULT="$RESULTS_DIR/test_results_unit.txt"
-E2E_RESULT="$RESULTS_DIR/test_results_e2e.txt"
 SCENARIO_RESULT="$RESULTS_DIR/test_results_scenario.txt"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 
@@ -28,17 +25,14 @@ mkdir -p "$RESULTS_DIR"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
-YELLOW='\033[1;33m'
 NC='\033[0m'
 
 RUN_UNIT=false
-RUN_E2E=false
 RUN_SCENARIO=false
 
 case "${1:-}" in
-    --e2e)      RUN_E2E=true ;;
     --scenario) RUN_SCENARIO=true ;;
-    --all)      RUN_UNIT=true; RUN_E2E=true; RUN_SCENARIO=true ;;
+    --all)      RUN_UNIT=true; RUN_SCENARIO=true ;;
     *)          RUN_UNIT=true ;;
 esac
 
@@ -50,7 +44,7 @@ TOTAL_FAIL=0
 # ---------------------------------------------------------------
 run_unit_tests() {
     echo ""
-    echo "== Unit Tests (214) =="
+    echo "== Unit Tests =="
 
     { echo "# Unit test results"; echo "# $TIMESTAMP"; echo ""; } > "$UNIT_RESULT"
 
@@ -74,62 +68,7 @@ run_unit_tests() {
 }
 
 # ---------------------------------------------------------------
-# E2E 테스트
-# ---------------------------------------------------------------
-run_e2e_tests() {
-    echo ""
-    echo "== E2E Tests (28) =="
-
-    echo "  Checking environment..."
-    if command -v ollama &>/dev/null && ollama list 2>/dev/null | grep -q "qwen3-coder"; then
-        echo -e "    Ollama:  ${GREEN}OK${NC}"
-        OLLAMA_OK=true
-    else
-        echo -e "    Ollama:  ${YELLOW}SKIP${NC}"
-        OLLAMA_OK=false
-    fi
-
-    CALCOM_KEY=$(grep -E '^CALCOM_API_KEY=' .env 2>/dev/null | cut -d= -f2- || true)
-    if [ -n "$CALCOM_KEY" ]; then
-        echo -e "    Cal.com: ${GREEN}OK${NC}"
-        CALCOM_OK=true
-    else
-        echo -e "    Cal.com: ${YELLOW}SKIP${NC}"
-        CALCOM_OK=false
-    fi
-
-    if [ "$OLLAMA_OK" = false ] && [ "$CALCOM_OK" = false ]; then
-        echo -e "  ${YELLOW}[SKIP]${NC} No E2E environment"
-        echo "# E2E SKIPPED - $TIMESTAMP" > "$E2E_RESULT"
-        return 0
-    fi
-
-    { echo "# E2E test results"; echo "# $TIMESTAMP"; echo ""; } > "$E2E_RESULT"
-
-    if (
-        set -a; [ -f .env ] && source .env; set +a
-        python -m pytest tests/test_e2e.py -v -m e2e -o "addopts=" --tb=short 2>&1
-    ) | tee -a "$E2E_RESULT"; then
-        echo -e "\n${GREEN}[PASS]${NC} E2E tests passed"
-        E2E_EXIT=0
-    else
-        echo -e "\n${RED}[FAIL]${NC} E2E tests failed"
-        E2E_EXIT=1
-    fi
-
-    E2E_SUMMARY=$(tail -1 "$E2E_RESULT")
-    echo "  Result: $E2E_SUMMARY"
-    echo "  Saved:  $E2E_RESULT"
-
-    PASSED=$(echo "$E2E_SUMMARY" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo "0")
-    FAILED=$(echo "$E2E_SUMMARY" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo "0")
-    TOTAL_PASS=$((TOTAL_PASS + PASSED))
-    TOTAL_FAIL=$((TOTAL_FAIL + FAILED))
-    return $E2E_EXIT
-}
-
-# ---------------------------------------------------------------
-# 시나리오 테스트 (9개 카테고리)
+# 시나리오 테스트 (9개 카테고리, 실제 LLM + Cal.com)
 # ---------------------------------------------------------------
 run_scenario_tests() {
     echo ""
@@ -165,9 +104,8 @@ echo "========================================================"
 
 EXIT_CODE=0
 
-[ "$RUN_UNIT" = true ]    && { run_unit_tests    || EXIT_CODE=1; }
-[ "$RUN_E2E" = true ]     && { run_e2e_tests     || EXIT_CODE=1; }
-[ "$RUN_SCENARIO" = true ] && { run_scenario_tests || EXIT_CODE=1; }
+[ "$RUN_UNIT" = true ]     && { run_unit_tests     || EXIT_CODE=1; }
+[ "$RUN_SCENARIO" = true ] && { run_scenario_tests  || EXIT_CODE=1; }
 
 echo ""
 echo "== Summary =="
@@ -175,7 +113,6 @@ echo "  Passed: $TOTAL_PASS"
 echo "  Failed: $TOTAL_FAIL"
 echo ""
 [ "$RUN_UNIT" = true ]     && echo "  Unit:     $UNIT_RESULT"
-[ "$RUN_E2E" = true ]      && echo "  E2E:      $E2E_RESULT"
 [ "$RUN_SCENARIO" = true ] && echo "  Scenario: $SCENARIO_RESULT"
 echo ""
 
