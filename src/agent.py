@@ -1251,7 +1251,8 @@ def _consume_pending_identity_input(
                 session_state["patient_name"] = inferred_name
                 ticket["patient_name"] = inferred_name
         pending_missing_info = [item for item in pending_missing_info if item != "is_proxy_booking"]
-        if not session_state.get("patient_name") and parsed_proxy is False:
+        inferred = session_state.get("patient_name") or ticket.get("customer_name") or session_state.get("customer_name")
+        if inferred and parsed_proxy is False:
             pending_missing_info = [item for item in pending_missing_info if item != "patient_name"]
         session_state["pending_missing_info_queue"] = list(pending_missing_info)
         session_state["pending_missing_info"] = list(pending_missing_info)
