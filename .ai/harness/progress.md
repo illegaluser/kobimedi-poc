@@ -1,6 +1,30 @@
 # Progress
 
-## 2026-03-26: F-052 운영시간 정책 구현 + 시나리오 테스트 체계 구축
+## 2026-03-26: 채팅 플로우 버그 수정 + 시나리오 테스트 체계 구축
+
+### 버그 수정 (8건)
+
+| 커밋 | 문제 | 수정 |
+|------|------|------|
+| `f9fa2b1` | Cal.com 환자이름이 "다음주"로 저장 | `_NON_NAME_WORDS`에 시간 키워드 추가 + 확정된 이름 덮어쓰기 방지 |
+| `ce9d279` | 예약 변경 시 "바꿔줘" off-topic 차단, "4월1일" 미인식, 새 날짜/시간 미수집 | `_is_booking_related`에 구어체 추가, 한글 날짜 파서 추가, modify missing_info 추가 |
+| `7ad91dd` | 취소 구어체("빼줘","안 갈래") off-topic 차단 | 3곳에 cancel 구어체 키워드 추가 |
+| `7001252` | LLM이 기존 date/time 추출 시 변경 완료 처리 | `target_appointment` 대비 비교로 기존값=미입력 판정 |
+| `f8e77c7` | 초진 환자에게 17:30(40분 초과) 슬롯 안내 | 슬롯 안내 시 초진/재진 진료시간 반영 필터링 |
+| `c1c8d94` | customer_name=None일 때 이름 미수집 | 실제 이름 존재 시에만 질문 스킵 |
+| `1643328` | "필요해"/"죽을것" 등이 환자이름으로 오추출 | `_NON_NAME_WORDS` + 동사 활용형 패턴 보강 |
+| `19bbf66` | LLM escalate/reject 시 response=None | policy 호출 전 early return + 안내 메시지 추가 |
+
+### 신규 스크립트
+
+| 파일 | 용도 |
+|------|------|
+| `scripts/test_booking_lifecycle.py` | 예약→변경→취소 생명주기 통합 테스트 (실제 Ollama + Cal.com) |
+| `scripts/demo_booking_lifecycle.py` | chat.py를 사람이 타이핑하듯 시연하는 대화형 데모 |
+
+---
+
+## 2026-03-26 (earlier): F-052 운영시간 정책 구현 + 시나리오 테스트 체계 구축
 
 ### 구현 사항
 
