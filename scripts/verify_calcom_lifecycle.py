@@ -196,6 +196,10 @@ def main():
 
         session = create_session(customer_name="테스트환자", customer_type="재진", all_appointments=[])
 
+        def wait_key(next_label: str):
+            print(f"\n  {D}[Enter] 다음 단계로 → {next_label}{X}")
+            input()
+
         # ═══════════════════════════════════════════
         # Step 1: 신규 진료예약
         # ═══════════════════════════════════════════
@@ -208,10 +212,12 @@ def main():
         book_ok = r.get("action") == "book_appointment"
         print(f"\n  {'✅' if book_ok else '❌'} 예약 {'성공' if book_ok else '실패'}")
 
+        wait_key("Cal.com 예약 생성 확인")
+
         # ═══════════════════════════════════════════
         # Step 2: Cal.com 예약 확인
         # ═══════════════════════════════════════════
-        print(f"\n{C}{'━' * 56}{X}")
+        print(f"{C}{'━' * 56}{X}")
         print(f"{C}  Step 2: Cal.com 예약 생성 확인{X}")
         print(f"{C}{'━' * 56}{X}")
         v1 = verify_calcom("신규 예약 생성", expect_exists=True, expect_time=book_time)
@@ -222,10 +228,12 @@ def main():
             results.append(("예약 변경", False))
             results.append(("예약 취소", False))
         else:
+            wait_key("예약 변경")
+
             # ═══════════════════════════════════════════
             # Step 3: 예약 변경
             # ═══════════════════════════════════════════
-            print(f"\n{C}{'━' * 56}{X}")
+            print(f"{C}{'━' * 56}{X}")
             print(f"{C}  Step 3: 예약 변경 (오전 {modify_time.split(':')[0]}시로){X}")
             print(f"{C}{'━' * 56}{X}")
 
@@ -236,19 +244,23 @@ def main():
             modify_ok = r.get("action") == "modify_appointment"
             print(f"\n  {'✅' if modify_ok else '❌'} 변경 {'성공' if modify_ok else '실패'}")
 
+            wait_key("Cal.com 예약 변경 확인")
+
             # ═══════════════════════════════════════════
             # Step 4: Cal.com 예약 변경 확인
             # ═══════════════════════════════════════════
-            print(f"\n{C}{'━' * 56}{X}")
+            print(f"{C}{'━' * 56}{X}")
             print(f"{C}  Step 4: Cal.com 예약 변경 확인{X}")
             print(f"{C}{'━' * 56}{X}")
             v2 = verify_calcom("변경 후 새 예약", expect_exists=True, expect_time=modify_time)
             results.append(("예약 변경", modify_ok and v2))
 
+            wait_key("예약 취소")
+
             # ═══════════════════════════════════════════
             # Step 5: 예약 취소
             # ═══════════════════════════════════════════
-            print(f"\n{C}{'━' * 56}{X}")
+            print(f"{C}{'━' * 56}{X}")
             print(f"{C}  Step 5: 예약 취소{X}")
             print(f"{C}{'━' * 56}{X}")
 
@@ -257,10 +269,12 @@ def main():
             cancel_ok = r.get("action") == "cancel_appointment"
             print(f"\n  {'✅' if cancel_ok else '❌'} 취소 {'성공' if cancel_ok else '실패'}")
 
+            wait_key("Cal.com 예약 삭제 확인")
+
             # ═══════════════════════════════════════════
             # Step 6: Cal.com 예약 삭제 확인
             # ═══════════════════════════════════════════
-            print(f"\n{C}{'━' * 56}{X}")
+            print(f"{C}{'━' * 56}{X}")
             print(f"{C}  Step 6: Cal.com 예약 삭제 확인{X}")
             print(f"{C}{'━' * 56}{X}")
             v3 = verify_calcom("취소 후 예약 삭제", expect_exists=False)
