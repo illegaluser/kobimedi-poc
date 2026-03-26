@@ -241,7 +241,7 @@ pytest tests/ -v
 
 ## E2E vs Mock 테스트 차이
 
-| 구분 | Mock 테스트 (Part 1) | E2E 테스트 (Part 2) |
+| 구분 | 유닛 테스트 (Part 1) | E2E 테스트 (Part 2) |
 |------|---------------------|---------------------|
 | LLM (Ollama) | Mock | 실제 호출 (qwen3-coder:30b) |
 | Storage (bookings.json) | Mock | 실제 파일 (격리된 tmp) |
