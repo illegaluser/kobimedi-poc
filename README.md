@@ -245,13 +245,31 @@ python scripts/cleanup_bookings.py --local-only
 
 ## 테스트
 
+### 테스트 파일 목록
+
+총 11개 테스트 파일, **254개 테스트** (유닛 226 + E2E 28).
+
+| 파일 | 테스트 수 | 검증 대상 |
+|------|----------|----------|
+| `tests/test_scenarios.py` | 51 | 9개 카테고리 시나리오 (Happy Path, Identity, Policy, 24h, Safety, Department, Operating Hours, Dialogue, Cal.com) |
+| `tests/test_calcom.py` | 51 | Cal.com API 연동 (슬롯 조회, 예약 생성, 취소, Race Condition, Graceful Degradation) |
+| `tests/test_safety.py` | 35 | Safety gate (의료 상담 차단, 인젝션 방어, 증상 안내, 혼합 요청 분리, LLM 폴백) |
+| `tests/test_e2e.py` | 28 | 실제 Ollama + Cal.com E2E (Mock 없음, `pytest.mark.e2e`) |
+| `tests/test_response_builder.py` | 27 | 응답 메시지 생성 (proxy 질문, 이름/연락처 수집, 분과/시간 안내) |
+| `tests/test_classifier.py` | 20 | 의도 분류 (LLM 파싱, 에러 복구, 의사→분과 매핑, 증상→분과 매핑) |
+| `tests/test_policy.py` | 14 | 정책 엔진 (슬롯 겹침, 정원, 24시간 룰, 대안 슬롯, 초진/재진 시간) |
+| `tests/test_dialogue.py` | 13 | 멀티턴 대화 (proxy 수집, 상태 유지, clarify 에스컬레이션, 배치/채팅 분기) |
+| `tests/test_storage.py` | 11 | 저장소 (영속화, 중복 방지, 취소, 초진/재진 판정, 파일 손상 복구) |
+| `tests/test_generalization.py` | 3 | 일반화 (한국어 인젝션, 혼합 요청, 모호한 환자 유형) |
+| `tests/test_batch.py` | 1 | 배치 모드 (run.py 출력 스키마 + KPI 메트릭) |
+
 ### 3가지 테스트 레벨
 
-| 구분 | 파일 | LLM | 검증 수준 | 속도 |
-|------|------|-----|----------|------|
-| 유닛 테스트 | `tests/test_scenarios.py` 외 | Mock | 정확한 문자열 + action + 상태 | ~9초 |
-| E2E 테스트 | `tests/test_e2e.py` | 실제 Ollama | action enum (느슨) | ~70초 |
-| 시나리오 러너 | `scripts/run_scenario_tests.py` | 실제 Ollama | action + 응답 + 상태 전이 (상세) | ~80초 |
+| 구분 | 실행 방법 | LLM | 검증 수준 | 속도 |
+|------|----------|-----|----------|------|
+| 유닛 테스트 (226개) | `pytest tests/` | Mock | 정확한 문자열 + action + 상태 | ~9초 |
+| E2E 테스트 (28개) | `pytest tests/test_e2e.py -m e2e` | 실제 Ollama | action enum (느슨) | ~70초 |
+| 시나리오 러너 (51개) | `python scripts/run_scenario_tests.py` | 실제 Ollama | action + 응답 + 상태 전이 (상세) | ~80초 |
 
 ### 실행 환경 요구 사항
 
