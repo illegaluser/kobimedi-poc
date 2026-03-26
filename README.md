@@ -2,18 +2,135 @@
 
 서울 소재 중형 네트워크 병원 **코비메디**의 진료 예약 접수/변경/취소 업무를 자동화하는 AI Agent PoC.
 
-## 빠른 시작
+## 설치 및 실행 가이드
+
+GitHub에서 clone한 후 `chat.py` 또는 `run.py`를 실행하기까지의 전체 과정이다.
+
+### 사전 요구 사항
+
+| 항목 | 버전 | 용도 | 필수 여부 |
+|------|------|------|----------|
+| Python | 3.12 이상 | 에이전트 런타임 | 필수 |
+| Ollama | 0.4.0 이상 | 로컬 LLM 서빙 | 필수 |
+| Git | - | 저장소 clone | 필수 |
+| Cal.com 계정 | - | 외부 예약 시스템 연동 (Q4) | 선택 |
+
+### Step 1: 저장소 clone
 
 ```bash
-# 1. 환경 초기화
-./scripts/init.sh
+git clone https://github.com/<owner>/kobimedi-poc.git
+cd kobimedi-poc
+```
 
-# 2. 인터랙티브 데모
+### Step 2: Python 가상환경 생성 + 의존성 설치
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+`requirements.txt` 내용:
+
+```
+ollama>=0.4.0
+pytest>=7.0.0
+freezegun>=1.2.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+```
+
+### Step 3: Ollama 설치 + LLM 모델 다운로드
+
+Ollama가 설치되어 있지 않다면:
+
+```bash
+# macOS
+brew install ollama
+
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+LLM 모델 다운로드 (약 18GB, 최초 1회):
+
+```bash
+ollama pull qwen3-coder:30b
+```
+
+Ollama 서비스 구동 확인:
+
+```bash
+ollama list
+# NAME                ID              SIZE
+# qwen3-coder:30b     06c1097efce0    18 GB
+```
+
+### Step 4: 환경변수 설정 (.env)
+
+Cal.com 연동(Q4)을 사용하려면 `.env` 파일을 프로젝트 루트에 생성한다. Cal.com 연동이 불필요하면 이 단계를 건너뛰어도 된다 (Graceful Degradation으로 로컬 정책만으로 동작).
+
+```bash
+# .env (프로젝트 루트)
+CALCOM_API_KEY=cal_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# cal.com 분과별 Event Type ID
+CALCOM_ENT_ID=1234567        # 이비인후과
+CALCOM_INTERNAL_ID=1234568   # 내과
+CALCOM_ORTHO_ID=1234569      # 정형외과
+```
+
+Cal.com Event Type ID는 cal.com 대시보드 > Event Types에서 확인할 수 있다.
+
+### Step 5: 설치 확인
+
+```bash
+# 자동 환경 점검 (가상환경, 의존성, Ollama 모델 상태 확인)
+./scripts/init.sh
+```
+
+또는 수동 확인:
+
+```bash
+# Python 버전
+python --version       # 3.12 이상
+
+# Ollama 모델
+ollama list            # qwen3-coder:30b 확인
+
+# 유닛 테스트
+pytest tests/ -v       # 226 passed
+```
+
+### Step 6: 실행
+
+```bash
+# 인터랙티브 챗봇
 python chat.py
 
-# 3. 배치 처리
+# 배치 처리
 python run.py --input data/tickets.json --output results.json
 ```
+
+### 빠른 시작 (한 줄 요약)
+
+위 과정을 이미 아는 경우:
+
+```bash
+git clone <repo> && cd kobimedi-poc
+./scripts/init.sh
+python chat.py
+```
+
+### 문제 해결
+
+| 증상 | 원인 | 해결 |
+|------|------|------|
+| `ModuleNotFoundError: No module named 'ollama'` | 의존성 미설치 | `pip install -r requirements.txt` |
+| `ollama._types.ResponseError` | Ollama 서비스 미구동 | `ollama serve` 실행 후 재시도 |
+| `model "qwen3-coder:30b" not found` | 모델 미다운로드 | `ollama pull qwen3-coder:30b` |
+| Cal.com 관련 clarify 응답 | `.env` 미설정 | `.env` 파일 생성 또는 무시 (로컬만으로 동작) |
+| `pytest` 시 226개 미만 통과 | 환경 문제 | `pip install -r requirements.txt` 재실행 |
 
 ## 프로젝트 구조
 
