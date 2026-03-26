@@ -452,6 +452,8 @@ _NON_NAME_WORDS: frozenset[str] = frozenset({
     "내과", "외과", "이비인후과", "정형외과", "피부과", "안과", "소아과", "치과", "응급",
     # Temporal expressions
     "오전", "오후", "오늘", "내일", "모레", "글피",
+    "다음주", "이번주", "지난주", "다음달", "이번달", "지난달",
+    "새벽", "아침", "점심", "저녁",
     # Identity / proxy terms
     "본인", "대리", "가족", "지인", "보호자", "환자",
     # Polite expressions / filler

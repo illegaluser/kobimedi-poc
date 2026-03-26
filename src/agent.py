@@ -957,9 +957,13 @@ def _sync_identity_state_from_intent(ticket: dict, session_state: dict | None, i
                 session_state["is_proxy_booking"] = bool(proxy_flag)
 
     if patient_name:
-        ticket["patient_name"] = patient_name
-        if session_state is not None:
-            session_state["patient_name"] = patient_name
+        # 채팅 모드에서 이미 확정된 patient_name이 있으면 후속 턴의
+        # 오추출(예: "다음주"→이름)로 덮어쓰지 않도록 보호한다.
+        existing_name = (session_state or {}).get("patient_name") or ticket.get("patient_name")
+        if not (is_chat and existing_name and existing_name != patient_name):
+            ticket["patient_name"] = patient_name
+            if session_state is not None:
+                session_state["patient_name"] = patient_name
 
     if patient_contact:
         ticket["patient_contact"] = patient_contact
