@@ -1,3 +1,7 @@
+# 유닛 테스트 결과
+# 실행 시각: 2026-03-26 11:15:01
+# 실행 명령: pytest tests/ -v --tb=short
+
 ============================= test session starts ==============================
 platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/luuuuunatic/Developer/kobimedi-poc/.venv/bin/python
 cachedir: .pytest_cache
@@ -221,4 +225,4 @@ tests/test_storage.py::test_create_booking_raises_write_error_and_preserves_orig
 tests/test_storage.py::test_create_booking_rechecks_storage_before_persist_and_blocks_duplicate_active_booking PASSED [ 99%]
 tests/test_storage.py::test_create_booking_uses_custom_fresh_recheck_and_preserves_existing_file_on_conflict PASSED [100%]
 
-====================== 214 passed, 28 deselected in 9.04s ======================
+====================== 214 passed, 28 deselected in 6.45s ======================

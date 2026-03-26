@@ -1,3 +1,8 @@
+# E2E 테스트 결과
+# 실행 시각: 2026-03-26 11:15:01
+# Ollama: true | Cal.com: true
+# 실행 명령: pytest tests/test_e2e.py -v -m e2e --tb=short
+
 ============================= test session starts ==============================
 platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/luuuuunatic/Developer/kobimedi-poc/.venv/bin/python
 cachedir: .pytest_cache
@@ -35,4 +40,4 @@ tests/test_e2e.py::TestE2ECalcom::test_9_batch_with_real_calcom PASSED   [ 92%]
 tests/test_e2e.py::TestE2ECalcom::test_9_chat_with_real_calcom PASSED    [ 96%]
 tests/test_e2e.py::TestE2EMixed::test_mixed_medical_and_booking PASSED   [100%]
 
-======================== 28 passed in 70.08s (0:01:10) =========================
+======================== 28 passed in 66.25s (0:01:06) =========================
