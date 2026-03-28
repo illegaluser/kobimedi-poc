@@ -34,13 +34,17 @@ DEFAULT_BOOKINGS_PATH = Path(__file__).resolve().parent.parent / "data" / "booki
 # _prepare_booking_record에서 이 목록을 기준으로 유효성 검증을 수행한다.
 REQUIRED_BOOKING_FIELDS = (
     "id",
-    "patient_name",
-    "patient_contact",
-    "is_proxy_booking",
     "booking_time",
     "department",
     "customer_type",
     "status",
+)
+
+# 채팅 모드에서만 수집되는 필드 — 배치 모드 티켓에는 존재하지 않으므로 필수가 아님.
+OPTIONAL_PATIENT_FIELDS = (
+    "patient_name",
+    "patient_contact",
+    "is_proxy_booking",
 )
 
 
@@ -399,17 +403,15 @@ def _prepare_booking_record(record: dict[str, Any], bookings: list[dict]) -> dic
     booking = dict(record)
 
     patient_name = _get_booking_patient_name(booking)
-    if not patient_name:
-        raise StorageValidationError("Missing required booking field: patient_name")
 
     normalized_contact = normalize_patient_contact(booking.get("patient_contact"))
-    if normalized_contact is None:
-        raise StorageValidationError("Missing required booking field: patient_contact")
 
     booking["id"] = str(booking.get("id") or _next_booking_id(bookings))
-    booking["patient_name"] = patient_name
-    booking.setdefault("customer_name", patient_name)
-    booking["patient_contact"] = str(booking.get("patient_contact")).strip()
+    if patient_name:
+        booking["patient_name"] = patient_name
+    booking.setdefault("customer_name", patient_name or booking.get("customer_name", ""))
+    if normalized_contact is not None:
+        booking["patient_contact"] = str(booking.get("patient_contact")).strip()
     booking["is_proxy_booking"] = bool(booking.get("is_proxy_booking", False))
     booking["status"] = str(booking.get("status") or "active")
     booking["created_at"] = str(booking.get("created_at") or now)

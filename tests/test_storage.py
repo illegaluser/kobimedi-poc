@@ -61,20 +61,22 @@ def test_create_booking_persists_required_fields_and_can_be_found_by_contact(tmp
     assert results[0]["id"] == created["id"]
 
 
-def test_create_booking_requires_patient_identity_fields(tmp_path):
+def test_create_booking_without_patient_contact_succeeds(tmp_path):
+    """배치 모드 티켓에는 patient_contact가 없으므로 저장이 허용되어야 한다."""
     storage_path = tmp_path / "bookings.json"
 
-    with pytest.raises(StorageValidationError):
-        create_booking(
-            {
-                "patient_name": "김민수",
-                "is_proxy_booking": False,
-                "department": "내과",
-                "booking_time": "2026-03-25T14:00:00+09:00",
-                "customer_type": "재진",
-            },
-            path=storage_path,
-        )
+    created = create_booking(
+        {
+            "patient_name": "김민수",
+            "is_proxy_booking": False,
+            "department": "내과",
+            "booking_time": "2026-03-25T14:00:00+09:00",
+            "customer_type": "재진",
+        },
+        path=storage_path,
+    )
+    assert created["patient_name"] == "김민수"
+    assert created["status"] == "active"
 
 
 def test_resolve_customer_type_uses_patient_contact_before_name(tmp_path):
