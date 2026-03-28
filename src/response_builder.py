@@ -1,3 +1,14 @@
+"""
+src/response_builder.py — 사용자 응답 메시지 생성 모듈
+
+agent.py가 최종 응답을 구성할 때 호출하는 유틸리티 함수 모음.
+날짜/시간을 자연어로 포맷팅하고, 누락 정보 질문·확인 질문·성공 메시지 등
+챗봇이 출력하는 모든 한국어 문구를 이 모듈에서 생성한다.
+
+핵심 원칙:
+  - 의료 관련 자유 텍스트를 생성하지 않는다 (하드코딩된 문구만 사용).
+  - LLM을 호출하지 않는다 — 모든 문구가 결정론적이다.
+"""
 
 from __future__ import annotations
 
@@ -6,11 +17,16 @@ from datetime import datetime, timezone
 from .classifier import SUPPORTED_DOCTORS
 
 
+# 의사 이름 → 분과 매핑 (예: "김만수" → "내과")
 DOCTOR_DEPARTMENT_MAP = SUPPORTED_DOCTORS
+# 역매핑: 분과 → 의사 이름 (예: "내과" → "김만수")
 DEPARTMENT_DOCTOR_MAP = {department: doctor for doctor, department in DOCTOR_DEPARTMENT_MAP.items()}
 
 
 def build_response(action: str, message: str, **kwargs) -> dict:
+    """agent.py가 반환하는 최종 응답 딕셔너리를 조립한다.
+    기본 구조: {"action": "...", "response": "..."}
+    추가 키워드 인자(department, confidence 등)는 그대로 병합된다."""
     response = {
         "action": action,
         "response": message,
@@ -20,6 +36,10 @@ def build_response(action: str, message: str, **kwargs) -> dict:
 
 
 def _ensure_datetime(value: str | datetime | None, now: datetime | None = None) -> datetime | None:
+    """문자열 또는 datetime을 timezone-aware datetime으로 정규화한다.
+    ISO 형식 문자열("2026-04-07T14:00:00+09:00")을 파싱하며,
+    timezone 정보가 없으면 now의 timezone 또는 UTC를 부여한다.
+    파싱 실패 시 None을 반환한다 (오류를 삼키지 않고 None으로 표현)."""
     if value is None:
         return None
 
@@ -29,6 +49,7 @@ def _ensure_datetime(value: str | datetime | None, now: datetime | None = None) 
         raw_value = str(value).strip()
         if not raw_value:
             return None
+        # ISO 형식의 "Z" 접미사를 "+00:00"으로 변환 (Python fromisoformat 호환)
         if raw_value.endswith("Z"):
             raw_value = f"{raw_value[:-1]}+00:00"
         try:
@@ -36,6 +57,7 @@ def _ensure_datetime(value: str | datetime | None, now: datetime | None = None) 
         except ValueError:
             return None
 
+    # timezone이 없으면 참조 시각의 timezone 또는 UTC를 부여
     reference_tz = now.tzinfo if now and now.tzinfo else timezone.utc
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=reference_tz)
@@ -43,6 +65,8 @@ def _ensure_datetime(value: str | datetime | None, now: datetime | None = None) 
 
 
 def _format_date_phrase(dt: datetime | None, now: datetime | None = None) -> str:
+    """날짜를 한국어 자연어로 변환한다.
+    오늘이면 "오늘(4/7)", 내일이면 "내일(4/8)", 그 외는 "4/10" 형식."""
     if dt is None:
         return ""
 
@@ -64,6 +88,7 @@ def _format_date_phrase(dt: datetime | None, now: datetime | None = None) -> str
 
 
 def _format_time_phrase(dt: datetime | None) -> str:
+    """시간을 한국어 자연어로 변환한다. 예: 14:00 → "오후 2시", 09:30 → "오전 9시 30분"."""
     if dt is None:
         return ""
     hour = dt.hour
@@ -88,10 +113,14 @@ def _format_time_phrase(dt: datetime | None) -> str:
 
 
 def format_appointment_summary(appointment: dict, now: datetime | None = None) -> str:
+    """예약 정보를 한 줄 요약 문자열로 변환한다.
+    예: "4/14 오전 10시 내과 김만수 진료"
+    날짜/시간/분과/의사를 가용한 정보 범위 내에서 조합한다."""
     department = appointment.get("department")
     doctor_name = appointment.get("doctor_name") or DEPARTMENT_DOCTOR_MAP.get(department)
     booking_time = appointment.get("booking_time")
 
+    # booking_time이 없으면 date + time 필드로 조립 시도
     if booking_time is None and appointment.get("date") and appointment.get("time"):
         booking_time = f"{appointment['date']}T{appointment['time']}:00"
 
@@ -114,11 +143,23 @@ def build_missing_info_question(
     action_context: str | None = None,
     customer_type: str | None = None,
 ) -> str:
+    """누락된 정보(missing_fields)에 따라 사용자에게 던질 추가 질문을 생성한다.
+
+    missing_fields의 첫 번째 항목(가장 우선순위가 높은 누락 필드)에 따라 분기:
+      - is_proxy_booking : "본인이신가요?" (환자 식별 — 최우선)
+      - patient_name     : "성함을 알려주세요" (연락처도 함께 누락이면 동시 요청)
+      - patient_contact  : "연락처를 알려주세요"
+      - department       : "어느 분과로 예약할까요?"
+      - date / time      : "원하시는 날짜와 시간을 알려주세요"
+      - appointment_target: "어떤 예약인지 알려주세요" (변경/취소 대상 특정)
+
+    action_context에 따라 문구가 미세하게 달라진다 (예약/변경/취소/조회)."""
     missing_fields = missing_fields or []
     primary = missing_fields[0] if missing_fields else None
 
     action = action_context or ""
 
+    # ── 1순위: 본인/대리 확인 (환자 식별) ──
     if primary == "is_proxy_booking":
         if action == "modify_appointment":
             return "예약 변경을 요청하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 요청하시는 건가요?"
@@ -126,9 +167,9 @@ def build_missing_info_question(
             return "예약 취소를 요청하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 요청하시는 건가요?"
         if action == "check_appointment":
             return "예약 확인을 요청하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 요청하시는 건가요?"
-        # book_appointment or default
         return "예약하시는 분이 환자 본인이신가요, 아니면 가족이나 지인을 대신하여 예약하시는 건가요?"
 
+    # ── 2순위: 환자 성함 ──
     if primary == "patient_name":
         has_contact_missing = "patient_contact" in missing_fields
         if action == "modify_appointment":
@@ -143,11 +184,11 @@ def build_missing_info_question(
             if has_contact_missing:
                 return "예약 확인을 위해 환자분 성함과 연락처를 함께 알려주세요. (예: 홍길동 010-1234-5678)"
             return "예약 확인을 위해 환자분 성함을 알려주세요."
-        # book_appointment or default
         if has_contact_missing:
             return "예약 진행을 위해 환자분 성함과 연락처를 함께 알려주세요. (예: 홍길동 010-1234-5678)"
         return "예약 진행을 위해 환자분 성함을 알려주세요."
 
+    # ── 3순위: 환자 연락처 ──
     if primary == "patient_contact":
         if action == "modify_appointment":
             return "예약 변경을 위해 환자분 연락처를 알려주세요."
@@ -157,9 +198,11 @@ def build_missing_info_question(
             return "예약 확인을 위해 환자분 연락처를 알려주세요."
         return "예약 진행을 위해 환자분 연락처를 알려주세요."
 
+    # ── 대안 슬롯 선택 ──
     if primary == "slot_selection":
         return "안내드린 대체 예약 시간 중 원하시는 번호를 선택해주세요."
 
+    # ── 기타 누락 필드별 질문 ──
     if primary == "customer_name":
         return "예약 진행을 위해 환자분 성함을 알려주세요."
     if primary == "birth_date":
@@ -184,12 +227,15 @@ def build_missing_info_question(
             return "어떤 예약을 확인할지 날짜, 시간 또는 분과를 알려주세요."
         return "대상 예약을 확인할 수 있도록 날짜, 시간 또는 분과를 알려주세요."
 
+    # ── 폴백 ──
     if action_context == "book_appointment":
         return "예약을 도와드리려면 원하시는 날짜, 시간, 진료과를 알려주세요."
     return "추가로 확인이 필요한 정보가 있습니다."
 
 
 def build_confirmation_question(appointment: dict, now: datetime | None = None) -> str:
+    """예약 확정 직전, 사용자에게 최종 확인 질문을 생성한다.
+    예: "4/14 오전 10시 내과 김만수 진료로 예약할까요?" """
     summary = format_appointment_summary(appointment, now)
     return f"{summary}로 예약할까요?"
 
@@ -199,6 +245,8 @@ def build_appointment_options_question(
     candidate_appointments: list[dict],
     now: datetime | None = None,
 ) -> str:
+    """동일 환자의 예약이 여러 건일 때, 번호 선택지를 생성한다.
+    예: "어떤 예약인지 선택해주세요. 1) 4/14 오전 10시 내과, 2) 4/15 오후 2시 정형외과" """
     options = [
         f"{index}) {format_appointment_summary(appointment, now)}"
         for index, appointment in enumerate(candidate_appointments, start=1)
@@ -214,6 +262,12 @@ def build_success_message(
     appointment: dict | None = None,
     now: datetime | None = None,
 ) -> str:
+    """action별 성공 완료 메시지를 생성한다.
+      - book_appointment   → "... 예약이 완료되었습니다."
+      - cancel_appointment → "... 예약 취소가 완료되었습니다."
+      - modify_appointment → "... 기준으로 예약 변경이 완료되었습니다."
+      - check_appointment  → "확인된 예약은 ...입니다."
+    """
     if action == "book_appointment":
         summary = format_appointment_summary(appointment or {"department": department}, now)
         return f"{summary} 예약이 완료되었습니다."

@@ -47,6 +47,12 @@ _tmp_dir = None
 _original_path = None
 
 def _setup():
+    """테스트용 격리 저장소를 생성한다.
+
+    임시 디렉터리에 빈 bookings.json을 만들고,
+    storage.DEFAULT_BOOKINGS_PATH를 해당 파일로 교체한다.
+    이렇게 하면 테스트가 실제 예약 데이터를 오염시키지 않는다.
+    """
     global _tmp_dir, _original_path
     _tmp_dir = tempfile.mkdtemp()
     f = Path(_tmp_dir) / "bookings.json"
@@ -55,6 +61,11 @@ def _setup():
     storage.DEFAULT_BOOKINGS_PATH = f
 
 def _teardown():
+    """격리 저장소를 정리하고 원래 경로를 복원한다.
+
+    _setup()에서 변경한 DEFAULT_BOOKINGS_PATH를 원래 값으로 되돌리고,
+    임시 디렉터리를 삭제한다.
+    """
     global _tmp_dir, _original_path
     if _original_path:
         storage.DEFAULT_BOOKINGS_PATH = _original_path
@@ -103,6 +114,18 @@ def format_calcom_booking(b: dict) -> str:
 
 # ── 챗봇 대화 ──
 def send(session: dict, msg: str) -> dict:
+    """챗봇에 메시지를 전송하고 결과를 콘솔에 출력한다.
+
+    process_message()를 호출하여 응답을 받은 뒤,
+    사용자 입력 · 챗봇 응답 · action 태그를 포맷하여 출력한다.
+
+    Args:
+        session: 대화 세션 딕셔너리 (create_session()으로 생성).
+        msg: 사용자 메시지 문자열.
+
+    Returns:
+        process_message()의 반환값 딕셔너리 (action, response 등 포함).
+    """
     r = process_message(msg, session=session, now=NOW)
     action = r.get("action", "?")
     response = r.get("response", "")
@@ -113,6 +136,19 @@ def send(session: dict, msg: str) -> dict:
 
 
 def respond_to_clarify(session: dict, r: dict) -> dict:
+    """clarify 응답이 반복될 때 자동으로 정보를 제공하는 루프.
+
+    챗봇이 clarify(추가 정보 요청)를 반환하면, 응답 내용에 따라
+    본인 여부 → 환자 정보 → 확인("네") 순서로 자동 응답한다.
+    최대 8회까지 반복하며, 슬롯 마감 등 예외 상황에서는 중단한다.
+
+    Args:
+        session: 대화 세션 딕셔너리.
+        r: 직전 process_message()의 반환값.
+
+    Returns:
+        마지막으로 받은 챗봇 응답 딕셔너리.
+    """
     for _ in range(8):
         if r.get("action") != "clarify":
             break
@@ -133,6 +169,20 @@ def respond_to_clarify(session: dict, r: dict) -> dict:
 
 # ── 검증 함수 ──
 def verify_calcom(label: str, expect_exists: bool, expect_time: str | None = None) -> bool:
+    """Cal.com에서 테스트 환자의 예약 존재 여부와 시간을 검증한다.
+
+    find_calcom_booking()으로 예약을 조회한 뒤,
+    expect_exists=True이면 예약이 존재하는지, False이면 삭제되었는지 확인한다.
+    expect_time이 주어지면 예약 시작 시간(KST)이 일치하는지도 검증한다.
+
+    Args:
+        label: 검증 단계 설명 (콘솔 출력용).
+        expect_exists: True면 예약이 존재해야 통과, False면 없어야 통과.
+        expect_time: 기대하는 시작 시간 "HH:MM" (KST). None이면 시간 검증 생략.
+
+    Returns:
+        검증 통과 여부 (True/False).
+    """
     print(f"\n  {C}── Cal.com 검증: {label} ──{X}")
     b = find_calcom_booking()
 
@@ -166,6 +216,22 @@ def verify_calcom(label: str, expect_exists: bool, expect_time: str | None = Non
 
 # ── 메인 ──
 def main():
+    """Cal.com 연동 검증의 전체 흐름을 실행한다.
+
+    6단계로 구성된 대화형 검증을 수행한다:
+      Step 1: 신규 진료예약 (챗봇 대화)
+      Step 2: Cal.com 예약 생성 확인 (API 직접 조회)
+      Step 3: 예약 변경 (챗봇 대화)
+      Step 4: Cal.com 예약 변경 확인 (API 직접 조회)
+      Step 5: 예약 취소 (챗봇 대화)
+      Step 6: Cal.com 예약 삭제 확인 (API 직접 조회)
+
+    각 단계 사이에 Enter 키 입력을 대기하여 수동으로 진행 속도를 제어할 수 있다.
+    테스트 전후로 Cal.com 잔여 예약을 정리하고, 격리 저장소를 사용한다.
+
+    Returns:
+        0이면 전체 통과, 1이면 일부 실패.
+    """
     # 날짜: NOW 기준 8일 후 평일
     target = NOW.replace(tzinfo=None) + timedelta(days=8)
     while target.weekday() >= 5:
@@ -197,6 +263,11 @@ def main():
         session = create_session(customer_name="테스트환자", customer_type="재진", all_appointments=[])
 
         def wait_key(next_label: str):
+            """다음 단계로 넘어가기 전 Enter 키 입력을 대기한다.
+
+            Args:
+                next_label: 다음 단계 이름 (안내 메시지에 표시됨).
+            """
             print(f"\n  {D}[Enter] 다음 단계로 → {next_label}{X}")
             input()
 

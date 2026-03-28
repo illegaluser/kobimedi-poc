@@ -65,6 +65,13 @@ def type_out(text: str, speed: dict):
 
 
 def print_phase(label: str):
+    """단계(phase) 구분선과 라벨을 출력한다.
+
+    시안색(CYAN) 구분선으로 Phase 1, Phase 2 등의 전환을 시각적으로 표시한다.
+
+    Args:
+        label: 단계 이름 (예: "Phase 1: 진료예약").
+    """
     print()
     print(f"{CYAN}{'─' * 50}{RESET}")
     print(f"{CYAN}  {label}{RESET}")
@@ -73,6 +80,15 @@ def print_phase(label: str):
 
 
 def run_demo(speed_name: str = "normal"):
+    """데모 메인 루프. chat.py를 서브프로세스로 띄우고 시나리오를 자동 입력한다.
+
+    chat.py를 subprocess.Popen으로 실행하여 stdin/stdout 파이프로 통신한다.
+    SCENARIO에 정의된 3개 Phase(진료예약 → 예약변경 → 예약취소)의 메시지를
+    타이핑 효과와 함께 순서대로 입력하고, 챗봇 응답을 콘솔에 출력한다.
+
+    Args:
+        speed_name: 타이핑 속도 ("fast", "normal", "slow" 중 하나).
+    """
     speed = SPEED[speed_name]
 
     proc = subprocess.Popen(
@@ -103,6 +119,11 @@ def run_demo(speed_name: str = "normal"):
         return "\n".join(lines)
 
     def send(msg: str):
+        """chat.py의 stdin에 메시지를 한 줄 전송한다.
+
+        Args:
+            msg: 사용자 입력으로 보낼 메시지 문자열.
+        """
         proc.stdin.write(msg + "\n")
         proc.stdin.flush()
 
@@ -143,6 +164,10 @@ def run_demo(speed_name: str = "normal"):
 
 
 def main():
+    """스크립트 진입점. --fast / --slow 플래그로 타이핑 속도를 선택한다.
+
+    인자를 파싱한 뒤 배너를 출력하고 run_demo()를 호출한다.
+    """
     parser = argparse.ArgumentParser(description="예약 생명주기 대화형 데모")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--fast", action="store_true", help="빠른 모드")

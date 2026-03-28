@@ -37,6 +37,14 @@ import src.storage as storage
 
 # ── 환경 체크 ──
 def _check_ollama() -> bool:
+    """Ollama LLM 서버가 구동 중인지 확인한다.
+
+    ollama.list()를 호출하여 정상 응답이 오면 True를 반환한다.
+    연결 실패 등 예외 발생 시 False를 반환한다.
+
+    Returns:
+        Ollama 사용 가능 여부 (True/False).
+    """
     try:
         import ollama
         ollama.list()
@@ -46,6 +54,14 @@ def _check_ollama() -> bool:
 
 
 def _check_calcom() -> bool:
+    """Cal.com API 키가 환경변수에 설정되어 있는지 확인한다.
+
+    CALCOM_API_KEY 환경변수의 존재 여부만 검사하며,
+    실제 API 호출 유효성은 검증하지 않는다.
+
+    Returns:
+        API 키 설정 여부 (True/False).
+    """
     import os
     return bool(os.environ.get("CALCOM_API_KEY"))
 
@@ -56,6 +72,12 @@ _original_path = None
 
 
 def _setup_storage():
+    """테스트용 격리 저장소를 생성한다.
+
+    임시 디렉터리에 빈 bookings.json 파일을 만들고,
+    storage.DEFAULT_BOOKINGS_PATH를 해당 파일로 교체한다.
+    이렇게 하면 테스트가 실제 운영 데이터를 오염시키지 않는다.
+    """
     global _tmp_dir, _original_path
     _tmp_dir = tempfile.mkdtemp()
     test_file = Path(_tmp_dir) / "bookings.json"
@@ -65,6 +87,11 @@ def _setup_storage():
 
 
 def _teardown_storage():
+    """격리 저장소를 정리하고 원래 경로를 복원한다.
+
+    _setup_storage()에서 변경한 DEFAULT_BOOKINGS_PATH를 원래 값으로 되돌리고,
+    임시 디렉터리를 삭제한다.
+    """
     global _tmp_dir, _original_path
     if _original_path:
         storage.DEFAULT_BOOKINGS_PATH = _original_path
@@ -116,7 +143,20 @@ def send(session: dict, msg: str, phase: str = "") -> dict:
 
 
 def respond_to_clarify(session: dict, r: dict, max_turns: int = 6) -> dict:
-    """identity 수집 루프 (proxy → 본인 → 연락처)를 자동 응답한다."""
+    """identity 수집 루프 (proxy → 본인 → 연락처)를 자동 응답한다.
+
+    챗봇이 clarify(추가 정보 요청)를 반환할 때마다 응답 내용을 분석하여
+    본인 여부, 이름+연락처를 자동 제공한다.
+    clarify가 아닌 다른 action이 나오거나 max_turns에 도달하면 종료한다.
+
+    Args:
+        session: 대화 세션 딕셔너리.
+        r: 직전 process_message()의 반환값.
+        max_turns: 최대 자동 응답 횟수 (기본 6회).
+
+    Returns:
+        마지막으로 받은 챗봇 응답 딕셔너리.
+    """
     for _ in range(max_turns):
         if r.get("action") != "clarify":
             break
@@ -131,7 +171,23 @@ def respond_to_clarify(session: dict, r: dict, max_turns: int = 6) -> dict:
 
 
 def run_test(dept: str, date_text: str, time_text: str, new_time_text: str) -> bool:
-    """예약→변경→취소 전체 플로우를 실행하고 성공 여부를 반환한다."""
+    """예약→변경→취소 전체 플로우를 실행하고 성공 여부를 반환한다.
+
+    3개 Phase를 순서대로 수행한다:
+      Phase 1 - 진료예약: 날짜/시간/분과를 지정하여 새 예약을 생성한다.
+                슬롯 마감 시 응답에서 대안 슬롯을 추출하여 재시도한다.
+      Phase 2 - 예약변경: 기존 예약의 시간을 new_time_text로 변경한다.
+      Phase 3 - 예약취소: 예약을 취소한다.
+
+    Args:
+        dept: 진료과 이름 (예: "내과", "이비인후과").
+        date_text: 예약 날짜 문자열 (예: "4월14일").
+        time_text: 예약 시간 문자열 (예: "오전 10시").
+        new_time_text: 변경 목표 시간 문자열 (예: "오전 11시").
+
+    Returns:
+        3개 Phase 모두 성공하면 True, 하나라도 실패하면 False.
+    """
     session = create_session(customer_name="테스트환자", customer_type="재진", all_appointments=[])
     results = {"book": False, "modify": False, "cancel": False}
 
@@ -202,6 +258,19 @@ def run_test(dept: str, date_text: str, time_text: str, new_time_text: str) -> b
 
 
 def main():
+    """스크립트 진입점. CLI 인자를 파싱하고 통합 테스트를 실행한다.
+
+    실행 순서:
+      1. 환경 체크 (Ollama 구동 여부, CALCOM_API_KEY 설정 여부)
+      2. 격리 저장소 생성 (_setup_storage)
+      3. Cal.com 잔여 예약 정리 (_cleanup_calcom)
+      4. run_test()로 예약→변경→취소 플로우 실행
+      5. 정리 (Cal.com 잔여 취소 + 격리 저장소 해제)
+      6. 결과 출력
+
+    Returns:
+        0이면 전체 통과, 1이면 실패 또는 환경 미충족.
+    """
     parser = argparse.ArgumentParser(
         description="예약 생명주기 통합 테스트 (진료예약 → 예약변경 → 예약취소)")
     parser.add_argument("--date", default=None, help="예약 날짜 (예: '4월15일', 기본: 8일 후 평일)")

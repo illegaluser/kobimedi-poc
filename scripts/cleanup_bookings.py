@@ -26,6 +26,15 @@ from src.storage import load_bookings, save_bookings, DEFAULT_BOOKINGS_PATH
 
 
 def _print_bookings(bookings: list[dict], source: str):
+    """예약 목록을 사람이 읽기 쉬운 형태로 콘솔에 출력한다.
+
+    각 예약의 uid, 제목(분과), 시작 시간, 상태, 환자 이름을 한 줄씩 표시한다.
+    예약이 없으면 '예약 없음' 메시지를 출력한다.
+
+    Args:
+        bookings: Cal.com 또는 로컬 저장소에서 가져온 예약 딕셔너리 리스트.
+        source: 출처 라벨 (예: "Cal.com", "Local") — 출력 헤더에 표시된다.
+    """
     if not bookings:
         print(f"  {source}: 예약 없음")
         return
@@ -90,6 +99,13 @@ def reset_local_bookings():
 
 
 def main():
+    """스크립트 진입점. CLI 인자를 파싱하여 취소/초기화를 수행한다.
+
+    --dry-run:    취소 대상만 조회하고 실제 취소는 수행하지 않는다.
+    --local-only: Cal.com은 건드리지 않고 로컬 bookings.json만 빈 배열로 초기화한다.
+    --force:      확인 프롬프트 없이 즉시 원격+로컬 전체 취소를 진행한다.
+    인자 없음:    원격 예약 건수를 보여주고 사용자 확인 후 취소+로컬 초기화를 수행한다.
+    """
     parser = argparse.ArgumentParser(description="Cal.com 예약 일괄 취소 + 로컬 동기화")
     parser.add_argument("--dry-run", action="store_true", help="취소 대상만 조회 (실제 취소 안 함)")
     parser.add_argument("--local-only", action="store_true", help="로컬 bookings.json만 초기화")
