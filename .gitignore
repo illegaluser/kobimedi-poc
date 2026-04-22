@@ -8,3 +8,4 @@ result.txt
 data/bookings.json
 src/__pycache__/agent.cpython-314.pyc
 src/__pycache__/classifier.cpython-314.pyc
+.DS_Store
